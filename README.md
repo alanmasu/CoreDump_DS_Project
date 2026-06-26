@@ -31,6 +31,39 @@ sdk install gradle 9.2.1
 ./gradlew test
 ```
 
+## Regression Testing suite
+To run regression tests use the command:
+```bash
+./gradlew regression
+```
+or 
+```bash
+./gradlew test --tests Regression
+```
+
+Every new functionality that is implemented must be accompanied by its tests. 
+
+### Adding tests to the regression suite
+For adding test to the regression suite please take a look on the `src/test/java/it/unitn/ds/regression/Regression.java` file, here a class `Regression` is defined. Inside this class you can add your tests, for example:
+```java
+@Test
+public void assertTrueTest() {
+    assertTrue(true);
+}
+```
+
+Note that to use it with Akka you need to use the `TestKit` class, for example:
+```java
+@Test
+public void testClientReadRequest() {
+    ActorSystem system = ActorSystem.create("TestSystem");
+    TestKit testProbe = new TestKit(system) {{
+        final ActorRef client = system.actorOf(Client.propsWithListener(getRef(), 0, 0, 0, 0, 0, 0));
+        ....        
+    }};
+}
+```
+
 ## Repository Structure
 
 In the `main/java/it/unitn/ds` directory you will find the project base classes.  
