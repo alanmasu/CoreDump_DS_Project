@@ -65,3 +65,14 @@ tasks.register('regression', Test) {
     }
     outputs.upToDateWhen { false }
 }
+
+javadoc {
+    // 1. Add the test sources to the documentation generator
+    source += sourceSets.test.allJava
+    
+    // 2. Add test dependencies so Javadoc recognizes JUnit and Akka TestKit imports
+    classpath += sourceSets.test.compileClasspath
+    
+    // 3. Keep the setting to show package-private and private classes
+    options.showFromPrivate() 
+}
