@@ -1,0 +1,28 @@
+name: Regression CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install gradle
+        run: |
+          curl -s "https://get.sdkman.io" | bash
+          source "$HOME/.sdkman/bin/sdkman-init.sh"
+          sdk install gradle 9.2.1
+      
+      - name: Set up gradle
+        run: |
+          gradle wrapper --gradle-version 9.2.1
+
+      - name: Run Tests
+        run: |
+          ./gradlew test --tests Regression
+          
