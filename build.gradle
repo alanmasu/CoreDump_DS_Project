@@ -43,3 +43,25 @@ compileJava {
 run {
     standardInput = System.in
 }
+
+// Custom test suite
+tasks.register('regression', Test) {
+    description = 'Runs only our tests'
+    group = 'verification'
+
+    useJUnitPlatform()
+
+    // Reuse the normal test source set
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+
+    filter {
+        includeTestsMatching '*Regression'
+    }
+
+    testLogging {
+        events "passed", "failed", "skipped"
+        showStandardStreams = true
+    }
+    outputs.upToDateWhen { false }
+}
