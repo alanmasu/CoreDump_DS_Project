@@ -73,8 +73,7 @@ public class TestsCommons {
             TestKit probe = new TestKit(system);
             probes.put(i, probe);
             group.put(i, system.actorOf(
-                            Replica.propsWithListener(i, min_latency, max_latency, TEST_COORDINATOR_BEAT_INTERVAL,
-                                    probe.getRef()),
+                            Replica.propsWithListener(i, min_latency, max_latency, TEST_COORDINATOR_BEAT_INTERVAL,probe.getRef()),
                             "Replica_" + i)
             );
         }
