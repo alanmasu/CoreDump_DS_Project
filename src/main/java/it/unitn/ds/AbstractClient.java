@@ -39,7 +39,7 @@ public abstract class AbstractClient extends AbstractActor {
      * This message is used to request a read operation to the system.
      * The client will send this message to itself, and then it will be handled by the AbstractClient.
      */
-    public static class ReadRequest {
+    public static class ReadRequest implements Serializable {
         ActorRef replica;
         int index;
 
@@ -66,7 +66,7 @@ public abstract class AbstractClient extends AbstractActor {
      * This message is used to request a write operation to the system.
      * The client will send this message to itself, and then it will be handled by the AbstractClient.
      */
-    public static class WriteRequest {
+    public static class WriteRequest implements Serializable {
         ActorRef replica;
         int index;
         int value;

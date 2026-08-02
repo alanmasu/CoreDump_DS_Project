@@ -1,5 +1,6 @@
 package it.unitn.ds;
 
+import java.io.Serializable;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 
@@ -32,6 +33,40 @@ public class Replica extends AbstractReplica {
         return Props.create(Replica.class, () -> new Replica(id, minLatency, maxLatency, coordinatorBeatInterval, Optional.ofNullable(listener)));
     }
     
+
+    ///////////// Sending helpers ////////////
+    public abstract class Msg implements Serializable {};
+
+    /**
+     * Broadcasts a message to all replicas in the group except itself.
+     * @param msg The message to be broadcasted.
+     * 
+     * @apiNote This method will be empowered in the future and will be able to send messages using total ordering
+     */
+    public void broadcast(Msg msg){
+        ActorRef target;
+        for (Map.Entry<Integer, ActorRef> entry : groupOfReplicas.entrySet()) {
+            target = entry.getValue();
+            if(target != getSelf()){
+                target.tell(msg, getSelf());
+            }
+        }
+    }
+
+    /**
+     * Sends a message to a specific replica.
+     * @param msg The message to be sent.
+     * @param target The replica to which the message will be sent.
+     * @apiNote This method will be empowered in the future and 
+     */
+    public void unicast(Msg msg, ActorRef target){
+        if(target == getSelf()){
+            return;
+        }
+        target.tell(msg, getSelf());
+    }
+    ////////////////////////////////////////////
+
     @Override
     public void initSystem(InitSystem sysInit) {
         this.groupOfReplicas = sysInit.group; 
