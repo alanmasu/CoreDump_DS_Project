@@ -15,6 +15,17 @@ public class Replica extends AbstractReplica {
     int positions[];
     int coordinatorID;
 
+    ///////////// For chashing ////////////
+    private enum CrashStatus {
+        NONE,
+        PENDING,
+        CRASHED
+    };
+    private CrashStatus replicaStatus;
+    private int crashCount;
+    private AbstractReplica.Crash pendingCrash;
+    ////////////////////////////////////////////
+
     public Replica(int id) {
         this(id, AbstractReplica.MIN_LATENCY, AbstractReplica.MAX_LATENCY, AbstractReplica.COORDINATOR_BEAT_INTERVAL, Optional.empty());
     }
@@ -22,6 +33,7 @@ public class Replica extends AbstractReplica {
     public Replica(int id, int minLatency, int maxLatency, int coordinatorBeatInterval, Optional<ActorRef> listener) {
         super(id, minLatency, maxLatency, coordinatorBeatInterval, listener);
         positions = new int[AbstractReplica.POSITIONS_LIST_LENGTH];
+        this.pendingCrash = null;
     }
 
     public static Props props(int id, int minLatency, int maxLatency, int coordinatorBeatInterval) {
@@ -44,6 +56,10 @@ public class Replica extends AbstractReplica {
      * @apiNote This method will be empowered in the future and will be able to send messages using total ordering
      */
     public void broadcast(Msg msg){
+        if(this.replicaStatus == CrashStatus.CRASHED){
+            return;
+        }
+
         ActorRef target;
         for (Map.Entry<Integer, ActorRef> entry : groupOfReplicas.entrySet()) {
             target = entry.getValue();
@@ -57,9 +73,13 @@ public class Replica extends AbstractReplica {
      * Sends a message to a specific replica.
      * @param msg The message to be sent.
      * @param target The replica to which the message will be sent.
-     * @apiNote This method will be empowered in the future and 
+     * @apiNote This method will be empowered in the future and will be able to send messages using total ordering
      */
     public void unicast(Msg msg, ActorRef target){
+        if(this.replicaStatus == CrashStatus.CRASHED){
+            return;
+        }
+        
         if(target == getSelf()){
             return;
         }
@@ -81,7 +101,14 @@ public class Replica extends AbstractReplica {
 
     @Override
     public void crash(AbstractReplica.Crash how_to_crash) {
-        // TODO: implement
+        if(how_to_crash.type == AbstractReplica.Crash.Type.Now){
+            this.replicaStatus = CrashStatus.CRASHED;
+            log("Replica crashed immediately due to " + how_to_crash.type + " crash.");
+            return;
+        }
+        this.pendingCrash = how_to_crash;
+        this.crashCount = 0;
+        this.replicaStatus = CrashStatus.PENDING;
     }
 
     @Override
@@ -91,4 +118,21 @@ public class Replica extends AbstractReplica {
                 .build();
     }
 
+
+    /**
+     * This callback method is invoked whenever a message is recieved by the replica and the parameter allows to differentiate the type of message.
+     * The callback then checks if the replica is in a pending crash state and if the type of message matches the pending crash type. 
+     * If so, it increments the crash count and checks if it has reached the threshold for crashing. 
+     * If the threshold is met, the replica's status is updated to CRASHED.
+     * @param crashType Enum representing the type of message received, used to determine if the replica should crash and if to increment the crash count.
+     */
+    void updateCrashStatusCallback(AbstractReplica.Crash.Type crashType) {
+        if (this.replicaStatus == CrashStatus.PENDING && this.pendingCrash.type == crashType) {
+            this.crashCount++;
+            if (this.crashCount >= this.pendingCrash.after_n_messages_of_type) {
+                this.replicaStatus = CrashStatus.CRASHED;
+                log("Replica crashed due to " + crashType + " crash.");
+            }
+        }
+    }
 }
