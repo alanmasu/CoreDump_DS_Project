@@ -35,30 +35,57 @@ public abstract class AbstractClient extends AbstractActor {
     // =================================================================================
     // API Messages
     // =================================================================================
-
-    public static class ReadRequest {
+    /**
+     * This message is used to request a read operation to the system.
+     * The client will send this message to itself, and then it will be handled by the AbstractClient.
+     */
+    public static class ReadRequest implements Serializable {
         ActorRef replica;
         int index;
 
+        /**
+         * This constructor is used to create a ReadRequest message with the specified index.
+         * @param index The index of the position to read.
+         */
         public ReadRequest(int index) {
             this(index, null);
         }
 
+        /**
+         * This constructor is used to create a ReadRequest message with the specified index and replica.
+         * @param index The index of the position to read.
+         * @param replica The replica to which the read request will be sent.
+         */
         public ReadRequest(int index, ActorRef replica) {
             this.replica = replica;
             this.index = index;
         }
     }
 
-    public static class WriteRequest {
+    /**
+     * This message is used to request a write operation to the system.
+     * The client will send this message to itself, and then it will be handled by the AbstractClient.
+     */
+    public static class WriteRequest implements Serializable {
         ActorRef replica;
         int index;
         int value;
 
+        /**
+         * This constructor is used to create a WriteRequest message with the specified index and value.
+         * @param index The index of the position to write.
+         * @param value The value to write.
+         */
         public WriteRequest(int index, int value) {
             this(index, value, null);
         }
 
+        /**
+         * This constructor is used to create a WriteRequest message with the specified index, value, and replica.
+         * @param index The index of the position to write.
+         * @param value The value to write.
+         * @param replica The replica to which the write request will be sent.
+         */
         public WriteRequest(int index, int value, ActorRef replica) {
             this.value = value;
             this.index = index;

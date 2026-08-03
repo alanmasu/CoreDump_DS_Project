@@ -1,0 +1,49 @@
+---
+config:
+  theme: forest
+---
+sequenceDiagram
+    participant M as Master
+
+    actor C1 as Client1
+    %% actor C2 as Client2
+    participant R1 as Replica1(coordinator)
+    participant R2 as Replica2
+    participant R3 as Replica3
+    participant R4 as Replica4
+
+    rect
+        note over M, R4: Master initializes the system and makes all replicas joining the group
+        M ->> R1: InitSystem(group, coordinator_id)
+        M ->> R2: InitSystem(group, coordinator_id)
+        M ->> R3: InitSystem(group, coordinator_id)
+        M ->> R4: InitSystem(group, coordinator_id)
+    end
+
+    rect
+        note over M, R1: Client sends a read request to Replica1
+        M ->> C1: ReadRequest(idx)
+        C1 ->> R1: ReadMsg(idx, Client1)
+        R1 ->> C1: ReadResult(idx, val)
+    end
+
+    rect 
+        note over M, R4: Client sends a write request to Replica2 which is not the coordinator
+        M ->> C1: WriteRequest(idx, val)
+        C1 ->> R2: WriteMsg(idx, val, Client1)
+        note left of R2: Update protocol triggered
+        R2 ->>+ R1: WriteMsg(idx, val, Client1)
+        R1 ->> R2: UpdateMsg(idx, val)
+        R1 ->> R3: UpdateMsg(idx, val)
+        R1 ->> R4: UpdateMsg(idx, val)
+        R4 ->> R1: UpdateAck(idx)
+        R2 ->> R1: UpdateAck(idx)
+        note right of R1: Quorum reached
+        R3 ->> R1: UpdateAck(idx)
+        R1 ->> R3: WriteOk(idx)
+        R1 ->> R4: WriteOk(idx)
+        R1 ->>- R2: WriteOk(idx)
+        note right of R1: Update completed
+
+        R2 ->> C1: WriteResult(idx, val)
+    end
