@@ -1,6 +1,5 @@
 package it.unitn.ds;
 
-import java.io.Serializable;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 
@@ -47,15 +46,16 @@ public class Replica extends AbstractReplica {
     
 
     ///////////// Sending helpers ////////////
-    public abstract class Msg implements Serializable {};
+    // public abstract class Msg implements Serializable {};
 
     /**
-     * Broadcasts a message to all replicas in the group except itself.
+     * Broadcasts a message to all replicas in the group.
      * @param msg The message to be broadcasted.
+     * @param includeSelf A boolean flag indicating whether to include the sender replica in the broadcast. If true, the message will also be sent to the sender replica; if false, it will be excluded.
      * 
      * @apiNote This method will be empowered in the future and will be able to send messages using total ordering
      */
-    public void broadcast(Msg msg){
+    public void broadcast(Msg msg, boolean includeSelf){
         if(this.replicaStatus == CrashStatus.CRASHED){
             return;
         }
@@ -63,10 +63,19 @@ public class Replica extends AbstractReplica {
         ActorRef target;
         for (Map.Entry<Integer, ActorRef> entry : groupOfReplicas.entrySet()) {
             target = entry.getValue();
-            if(target != getSelf()){
+            if(target != getSelf() || includeSelf){
                 target.tell(msg, getSelf());
             }
         }
+    }
+
+    /**
+     * Broadcasts a message to all replicas in the group except itself.
+     * 
+     * @param msg The message to be broadcasted.
+     */
+    public void broadcast(Msg msg){
+        broadcast(msg, false);
     }
 
     /**
