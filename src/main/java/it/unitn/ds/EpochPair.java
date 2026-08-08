@@ -1,7 +1,8 @@
 package it.unitn.ds;
 
+import java.io.Serializable;
 
-public class EpochPair implements Comparable<EpochPair> {
+public class EpochPair implements Comparable<EpochPair>, Serializable {
     protected int epoch;
     protected int sequence;
 
