@@ -8,11 +8,12 @@ public abstract class Transaction{
 
     protected Cancellable timeout;
     protected ActorRef owner;
-
+    protected EpochPair epochPair;
 
     Transaction(ActorRef owner, Cancellable timeout) {
         this.owner = owner;
         this.timeout = timeout;
+        this.epochPair = null;
     }
 
     /**
