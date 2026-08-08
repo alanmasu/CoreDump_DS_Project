@@ -46,7 +46,7 @@ run {
 
 // Custom test suite
 tasks.register('regression', Test) {
-    description = 'Runs only our tests'
+    description = 'Runs all tests in the it.unitn.ds.regression package'
     group = 'verification'
 
     useJUnitPlatform()
@@ -56,7 +56,7 @@ tasks.register('regression', Test) {
     classpath = sourceSets.test.runtimeClasspath
 
     filter {
-        includeTestsMatching '*Regression'
+        includeTestsMatching 'it.unitn.ds.regression.*'
     }
 
     testLogging {
