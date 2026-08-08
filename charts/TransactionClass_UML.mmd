@@ -68,6 +68,8 @@ classDiagram
     Transaction ..|> Comparable : implements
     %% realization: EpochPair implements Comparable<EpochPair> (epoch first, then sequence)
     EpochPair ..|> Comparable : implements
+    %% realization: EpochPair implements Serializable so it can travel over the network
+    EpochPair ..|> Serializable : implements
     %% realization: Msg implements Serializable so messages can travel over the network
     Msg ..|> Serializable : implements
 
