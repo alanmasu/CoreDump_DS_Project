@@ -1,30 +1,57 @@
 package it.unitn.ds;
 
 import akka.actor.Cancellable;
-import akka.actor.Actor;
+import akka.actor.AbstractActor;
 
+import java.util.ArrayList;
 import java.util.List;
 
-public abstract class Transaction{
+public abstract class Transaction implements Comparable<Transaction> {
 
-    protected Cancellable timeout;
-    protected Actor owner;
-    protected EpochPair epochPair;
+    public Cancellable timeout;
+    public AbstractActor owner;
+    public EpochPair epochPair;
     public int id;
 
-    List<Msg> history;
+    public List<Msg> history;
 
-    Transaction(Actor owner, Cancellable timeout) {
+    public Transaction(int id, AbstractActor owner) {
         this.owner = owner;
-        this.timeout = timeout;
+        this.id = id;
+        this.timeout = null;
         this.epochPair = null;
+        this.history = new ArrayList<>();
     }
+
+    @Override
+    public int compareTo(Transaction other) {
+        if (this.epochPair == null && other.epochPair == null) {
+            return 0;
+        } else if (this.epochPair == null) {
+            return -1;
+        } else if (other.epochPair == null) {
+            return 1;
+        } else {
+            return this.epochPair.compareTo(other.epochPair);
+        }
+    }
+
+    @Override
+    public String toString() {
+        return "Transaction[" +
+                "id: " + id +
+                ", epochPair: " + epochPair +
+                ", owner: " + owner.getSelf().path().name() +
+                ", state: " + getState() +
+                ']';
+    }
+
 
     /**
      * Returns the current state of the transaction.
      * @return the current state of the transaction as a String.
      */
-    abstract String getState();
+    public abstract String getState();
 
     /**
      * Computes the new state of the transaction based on the given message. 
@@ -32,11 +59,11 @@ public abstract class Transaction{
      * 
      * @param msg the message to process and compute the new state.
      */
-    abstract void computeState(Msg msg);
+    public abstract void computeState(Msg msg);
 
     /**
      * This method is called when a new coordinator is elected. 
      * It allows the transaction to perform any necessary actions to conclude the transactions previously handled by the old coordinator.
      */
-    abstract void onCoordinatorElected();
+    public abstract void onCoordinatorElected();
 }
