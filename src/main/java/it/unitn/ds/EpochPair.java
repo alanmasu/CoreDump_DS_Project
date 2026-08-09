@@ -3,8 +3,8 @@ package it.unitn.ds;
 import java.io.Serializable;
 
 public class EpochPair implements Comparable<EpochPair>, Serializable {
-    protected int epoch;
-    protected int sequence;
+    protected final int epoch;
+    protected final int sequence;
 
     public EpochPair(int epoch, int sequence) {
         this.epoch = epoch;
@@ -49,12 +49,5 @@ public class EpochPair implements Comparable<EpochPair>, Serializable {
     }
     public int getSequence() {
         return sequence;
-    }
-
-    public void setEpoch(int newEpoch) {
-        this.epoch = newEpoch;
-    }
-    public void setSequence(int newSequence) {
-        this.sequence = newSequence;
     }
 }
