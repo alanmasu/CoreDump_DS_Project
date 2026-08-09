@@ -24,17 +24,17 @@ sequenceDiagram
         %% R1 ->> R1: UpdateMsg(idx, val)
         note over R1: R1 counts itself as an ACK
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        R1 ->> R2: UpdateMsg(idx, val)
+        R1 ->> R2: UpdateMsg(<2,4>, idx, val)
         note over R2: Transaction on R2 waits the WRITEOK Msg
-        R1 ->> R3: UpdateMsg(idx, val)
+        R1 ->> R3: UpdateMsg(<2,4>, idx, val)  
         note over R3: Transaction UPDATE init on R3
         note over R3: Timeout for WRITEOK Msg
-        R3 ->> R1: UpdateAck(idx)
+        R3 ->> R1: UpdateAck(<2,4>)
         note over R1: Quorum reached on R1
-        R1 ->> R3: WriteOk(idx)
-        R1 ->>- R2: WriteOk(idx)
+        R1 ->> R3: WriteOk(<2,4>)
+        R1 ->>- R2: WriteOk(<2,4>)
         note over R3: Transaction UPDATE completed on R3
-        R2 ->> R1: UpdateAck(idx)
+        R2 ->> R1: UpdateAck(<2,4>)
         note over R1, R2: Transaction UPDATE completed on R2 and R1
 
         R2 ->> C1: WriteResult(idx, val)

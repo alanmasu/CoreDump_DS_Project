@@ -23,11 +23,13 @@ sequenceDiagram
     end
 
     rect rgba(255, 0, 0, 0.3)
-        note over M, R1: Client sends a read request to Replica1
-        M ->> C1: ReadRequest(idx)
-        note over C1: Transaction READ init on C1
-        %% then the client starts the timeout for the transaction
-        C1 ->>+ R1: ReadMsg(idx, Client1, transaction_id)
-        R1 --x- C1: ReadResult(idx, val, transaction_id)
-        note over C1: Transaction abort by timeout on C1
+        note over M, R1: Client sends a read request to Replica1 that has crashed
+        note over R1: R1 has crashed  
+        M ->> C1: ReadRequest(idx)  
+        note over C1: Transaction READ initialized  
+        C1 ->> R1: ReadMsg(idx, Client1, transaction_id)  
+        note over C1: Read timeout starts  
+        note over R1: Request ignored because R1 is crashed  
+        C1 ->> C1: ReadTimeout(transaction_id)  
+        note over C1: Transaction aborted by timeout  
     end

@@ -76,7 +76,7 @@ classDiagram
     %% aggregation: epochPair is null at construction and assigned later by the owner
     Transaction "1" o-- "0..1" EpochPair : epochPair
     %% composition: the history list is allocated in the constructor and dies with the transaction
-    Transaction "1" *-- "0..*" Msg : history
+    Transaction "0..*" *-- "1" Msg : history
     %% association: field pointing to the actor that owns the transaction; the actor outlives it
     Transaction "1" --> "1" AbstractActor : owner
     %% association: field holding the scheduled timeout, null until a timer is armed
