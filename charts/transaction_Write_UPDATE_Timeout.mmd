@@ -23,13 +23,12 @@ sequenceDiagram
         %% R1 ->> R1: UpdateMsg(idx, val)
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-        note over R1: R1 has crashed
+        note over R1: ❌ R1 crashes before completing the UPDATE broadcast
         R1 --x- R2: UpdateMsg(idx, val) 
         note over R2: Transaction UPDATE timeout
         note over R2: Transaction ELECTION init on R2 
         R2 --x C1: WriteResult(idx, val)
         note over C1: Transaction WRITE timeout on C1
-        destroy R1
         
         note over R2, R3: Transaction ELECTION OK and R3 becomes the new coordinator
         R2 ->> R3: WriteMsg(id, val, Replica2)
