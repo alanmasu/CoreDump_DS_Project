@@ -61,9 +61,4 @@ public abstract class Transaction implements Comparable<Transaction> {
      */
     public abstract void computeState(Msg msg);
 
-    /**
-     * This method is called when a new coordinator is elected. 
-     * It allows the transaction to perform any necessary actions to conclude the transactions previously handled by the old coordinator.
-     */
-    public abstract void onCoordinatorElected();
 }
