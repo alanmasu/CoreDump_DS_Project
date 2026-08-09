@@ -1,0 +1,40 @@
+---
+config:
+    theme: forest
+---
+
+stateDiagram-v2
+
+%% This diagram models one HeartbeatTransaction owned by one Replica.
+%% The transaction handles many heartbeat periods, but only for one
+%% coordinator term. It ends when control passes to ElectionTransaction.
+
+%% [*] used as a source means "the transaction lifecycle begins".
+%% STOPPED means the object exists, but no heartbeat timer is active yet.
+[*] --> STOPPED
+
+%% When the transaction starts, the owning Replica chooses its role by
+%% comparing its own ID with the current coordinator ID.
+STOPPED --> COORDINATOR: start as coordinator
+STOPPED --> WATCHING: start as follower
+
+%% HeartbeatTick is an internal message. The Akka Scheduler sends it to the
+%% coordinator Replica's own mailbox. Handling the tick broadcasts a network
+%% HEARTBEAT and schedules the next one-shot HeartbeatTick.
+COORDINATOR --> COORDINATOR: HeartbeatTick
+
+%% A follower starts a watchdog when it enters WATCHING. A valid HEARTBEAT is
+%% one sent by the coordinator monitored by this transaction. It cancels and
+%% replaces the current watchdog, while the transaction remains in WATCHING.
+WATCHING --> WATCHING: valid HEARTBEAT
+
+%% WatchdogExpired is also an internal scheduler message. "current" means its
+%% coordinator ID and generation match the active watchdog. Older cancelled
+%% watchdog messages are stale and must be ignored by the Java implementation.
+WATCHING --> ELECTION_REQUESTED: current WatchdogExpired
+
+%% ELECTION_REQUESTED prevents multiple election requests for the same
+%% coordinator failure. Once ElectionTransaction starts, this heartbeat
+%% transaction has completed. A new coordinator term gets a new instance.
+%% [*] used as a destination means "the transaction lifecycle ends".
+ELECTION_REQUESTED --> [*]: ElectionTransaction started
