@@ -1,0 +1,87 @@
+---
+config:
+  theme: forest
+---
+classDiagram
+
+    direction BT
+    
+    class Transaction {
+        <<abstract>>
+        +int id
+        +Cancellable timeout
+        +AbstractActor owner
+        +EpochPair epochPair
+        +List~Msg~ history
+        +Transaction(int id, AbstractActor owner)
+        +int compareTo(Transaction other)
+        +String toString()
+        +String getState()*
+        +void computeState(Msg msg)*
+    }
+
+    class EpochPair {
+        #final int epoch
+        #final int sequence
+        +EpochPair(int epoch, int sequence)
+        +int compareTo(EpochPair other)
+        +int getEpoch()
+        +int getSequence()
+        +String toString()
+        +boolean equals(Object obj)
+        +int hashCode()
+    }
+
+    class Msg {
+        <<abstract>>
+    }
+
+    class Comparable {
+        <<interface>>
+    }
+
+    class Serializable {
+        <<interface>>
+    }
+
+    class AbstractActor {
+        <<akka.actor>>
+    }
+
+    class Cancellable {
+        <<akka.actor>>
+    }
+
+    %% ------------------------------------------------------------------
+    %% Legend of the notation used below
+    %%   ..|>  realization  : "implements" an interface (dashed + hollow triangle)
+    %%   --|>  inheritance  : "extends" a class         (solid  + hollow triangle)
+    %%   *--   composition  : the part is created by the whole and dies with it
+    %%   o--   aggregation  : the part is injected from outside, outlives the whole
+    %%   -->   association  : the source keeps a *field* referencing the target
+    %%   ..>   dependency   : the target only appears in a signature / local scope
+    %% Diamonds (*-- and o--) are always drawn on the side of the "whole".
+    %% Multiplicities read towards the far end: "1" A --> "0..*" B = one A, many B.
+    %% ------------------------------------------------------------------
+
+    %% realization: Transaction implements Comparable<Transaction> (orders by epochPair)
+    Transaction ..|> Comparable : implements
+    %% realization: EpochPair implements Comparable<EpochPair> (epoch first, then sequence)
+    EpochPair ..|> Comparable : implements
+    %% realization: EpochPair implements Serializable so it can travel over the network
+    EpochPair ..|> Serializable : implements
+    %% realization: Msg implements Serializable so messages can travel over the network
+    Msg ..|> Serializable : implements
+
+    %% aggregation: epochPair is null at construction and assigned later by the owner
+    Transaction "1" o-- "0..1" EpochPair : epochPair
+    %% aggregation: a transaction stores references to the messages it has processed
+    Transaction "1" o-- "0..*" Msg : history
+    %% association: field pointing to the actor that owns the transaction; the actor outlives it
+    Transaction "1" --> "1" AbstractActor : owner
+    %% association: field holding the scheduled timeout, null until a timer is armed
+    Transaction "1" --> "0..1" Cancellable : timeout
+    %% dependency: Msg appears as a parameter of computeState(), no state is kept
+    Transaction ..> Msg : computeState(msg)
+    %% dependency: compareTo() delegates the ordering to EpochPair.compareTo()
+    Transaction ..> EpochPair : compareTo delegates

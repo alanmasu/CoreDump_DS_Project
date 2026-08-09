@@ -1,0 +1,35 @@
+---
+config:
+  theme: forest
+---
+sequenceDiagram
+    participant M as Master
+
+    actor C1 as Client1
+    %% actor C2 as Client2
+    participant R1 as Replica1(coordinator)
+    participant R2 as Replica2
+    participant R3 as Replica3
+    participant R4 as Replica4
+
+    rect rgba(0, 255, 0, 0.3)
+        note over M, R1: Client sends a read request to Replica1
+        M ->> C1: ReadRequest(idx)
+        note over C1: Transaction READ init on C1
+        %% then the client starts the timeout for the transaction
+        C1 ->>+ R1: ReadMsg(idx, Client1, transaction_id)
+        R1 ->>- C1: ReadResult(idx, val, transaction_id)
+        note over C1: Transaction completed successfully on C1
+    end
+
+    rect rgba(255, 0, 0, 0.3)
+        note over M, R1: Client sends a read request to Replica1 that has crashed
+        note over R1: R1 has crashed  
+        M ->> C1: ReadRequest(idx)  
+        note over C1: Transaction READ initialized  
+        C1 ->> R1: ReadMsg(idx, Client1, transaction_id)  
+        note over C1: Read timeout starts  
+        note over R1: Request ignored because R1 is crashed  
+        C1 ->> C1: ReadTimeout(transaction_id)  
+        note over C1: Transaction aborted by timeout  
+    end

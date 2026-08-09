@@ -1,0 +1,61 @@
+---
+config:
+  theme: forest
+---
+sequenceDiagram
+    participant M as Master
+
+    actor C1 as Client1
+    %% actor C2 as Client2
+    participant R1 as Replica1(coordinator)
+    participant R2 as Replica2
+    participant R3 as Replica3
+
+    rect rgba(255, 0, 0, 0.3)
+        note over M, R3: Client sends a write request to Replica2 which is not the coordinator
+        M ->> C1: WriteRequest(idx, val)
+        note over C1: Transaction WRITE init on C1
+        C1 ->> R2: WriteMsg(idx, val, Client1)
+        note over R2: Transaction UPDATE init on R2
+        R2 ->>+ R1: WriteMsg(idx, val, Replica2)
+        note over R1: Transaction UPDATE init on R1
+        %%%%%%%% Maybe this could be removed %%%%%%%%
+        %% R1 ->> R1: UpdateMsg(idx, val)
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        note over R1: ❌ R1 crashes before completing the UPDATE broadcast
+        R1 --x- R2: UpdateMsg(idx, val) 
+        note over R2: Transaction UPDATE timeout
+        note over R2: Transaction ELECTION init on R2 
+        R2 --x C1: WriteResult(idx, val)
+        note over C1: Transaction WRITE timeout on C1
+        
+        note over R2, R3: Transaction ELECTION OK and R3 becomes the new coordinator
+        R2 ->> R3: WriteMsg(id, val, Replica2)
+        note over R3: Transaction UPDATE init on R3
+        R3 ->> R2: UpddateMsg(idx, val)
+        R2 ->> R3: UpdateAck(idx)
+        note over R3: Quorum reached on R3
+        R3 ->> R2: WriteOk(idx)
+        note over R2, R3: Transaction UPDATE completed on R2 and R3
+        R2 ->> C1: WriteResult(idx, val)
+        note over C1: Transaction WRITE completed on C1
+
+        %% note over R
+
+
+        %% note over R2: Transaction UPDATE init on R2
+        %% %% R1 ->> R3: UpdateMsg(idx, val)
+        %% note over R3: Transaction UPDATE init on R3
+        %% R2 ->> R1: UpdateAck(idx)
+        %% note over R1: Quorum reached on R1
+        %% R3 ->> R1: UpdateAck(idx)
+        %% R1 ->> R3: WriteOk(idx)
+        %% note over R3: Transaction UPDATE completed on R3
+        %% R1 ->>- R2: WriteOk(idx)
+        %% note over R1, R2: Transaction UPDATE completed on R2 and R1
+
+        %% R2 ->> C1: WriteResult(idx, val)
+        %% note over C1: Transaction WRITE completed on C1
+    end
+

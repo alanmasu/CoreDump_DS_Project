@@ -1,0 +1,45 @@
+---
+config:
+  theme: forest
+---
+sequenceDiagram
+    participant M as Master
+
+    actor C1 as Client1
+    %% actor C2 as Client2
+    participant R1 as Replica1(coordinator)
+    participant R2 as Replica2
+    participant R3 as Replica3
+
+    rect rgba(0, 255, 0, 0.3)
+        note over M, R3: Client sends a write request to Replica2 which is not the coordinator
+        M ->> C1: WriteRequest(idx, val)
+        note over C1: Transaction WRITE init on C1
+        C1 ->> R2: WriteMsg(idx, val, Client1)
+        note over R2: Transaction UPDATE init on R2
+        note over R2: Timeout for UPDATE Msg
+        R2 ->>+ R1: WriteMsg(idx, val, Client1)
+        note over R1: Transaction UPDATE init on R1
+        %%%%%%%% Maybe this could be removed %%%%%%%%
+        %% R1 ->> R1: UpdateMsg(idx, val)
+        note over R1: R1 counts itself as an ACK
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        R1 ->> R2: UpdateMsg(<2,4>, idx, val)
+        note over R2: Transaction on R2 waits the WRITEOK Msg
+        R1 ->> R3: UpdateMsg(<2,4>, idx, val)  
+        note over R3: Transaction UPDATE init on R3
+        note over R3: Timeout for WRITEOK Msg
+        R3 ->> R1: UpdateAck(<2,4>)
+        note over R1: Quorum reached on R1
+        R1 ->> R3: WriteOk(<2,4>)
+        R1 ->>- R2: WriteOk(<2,4>)
+        note over R3: Transaction UPDATE completed on R3
+        R2 ->> R1: UpdateAck(<2,4>)
+        note over R1, R2: Transaction UPDATE completed on R2 and R1
+
+        R2 ->> C1: WriteResult(idx, val)
+        note over C1: Transaction WRITE completed on C1
+    end
+    
+
+

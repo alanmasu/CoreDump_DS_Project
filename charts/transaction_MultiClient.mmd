@@ -1,0 +1,26 @@
+---
+config:
+  theme: forest
+---
+sequenceDiagram
+    participant M as Master
+
+    actor C1 as Client1
+    actor C2 as Client2
+    participant R1 as Replica1(coordinator)
+    participant R2 as Replica2
+    participant R3 as Replica3
+
+    rect rgba(0, 255, 0, 0.3)
+        note over M, R3: Client sends a write request to Replica2 which is not the coordinator
+        M ->> C1: WriteRequest(idx, val)
+        note over C1: Transaction WRITE init on C1
+        C1 ->> R2: WriteMsg(idx, val, Client1)
+        note over R2: Transaction UPDATE init on R2
+        M ->> C2: WriteRequest(idx, val)
+        note over C2: Transaction WRITE init on C2
+        C2 ->> R2: WriteMsg(idx, val, Client2)
+        note over R2: Transaction UPDATE init on R2
+    end
+    
+
