@@ -1,40 +1,58 @@
 ---
+title: HeartbeatTransaction FSM
 config:
-    theme: forest
+  theme: forest
+  layout: elk
+  markdownAutoWrap: false
 ---
 
 stateDiagram-v2
+    direction LR
 
-%% This diagram models one HeartbeatTransaction owned by one Replica.
-%% The transaction handles many heartbeat periods, but only for one
-%% coordinator term. It ends when control passes to ElectionTransaction.
+    %% The displayed labels make the owning Replica's role explicit while the
+    %% aliases keep the actual FSM state names available to Mermaid.
+    state "WATCHING<br/>(follower Replica)" as WATCHING
+    state "COORDINATOR<br/>(coordinator Replica)" as COORDINATOR
 
-%% [*] used as a source means "the transaction lifecycle begins".
-%% STOPPED means the object exists, but no heartbeat timer is active yet.
-[*] --> STOPPED
+    %% This diagram models one HeartbeatTransaction owned by one Replica.
+    %% It handles repeated heartbeat periods for one coordinator term and ends
+    %% when its owner crashes or responsibility passes to ElectionTransaction.
 
-%% When the transaction starts, the owning Replica chooses its role by
-%% comparing its own ID with the current coordinator ID.
-STOPPED --> COORDINATOR: start as coordinator
-STOPPED --> WATCHING: start as follower
+    %% [*] as a source represents the beginning of the transaction lifecycle.
+    [*] --> STOPPED: transaction created
 
-%% HeartbeatTick is an internal message. The Akka Scheduler sends it to the
-%% coordinator Replica's own mailbox. Handling the tick broadcasts a network
-%% HEARTBEAT and schedules the next one-shot HeartbeatTick.
-COORDINATOR --> COORDINATOR: HeartbeatTick
+    %% After InitSystem, the owner compares its ID with the coordinator ID and
+    %% starts the transaction in the role appropriate for this coordinator term.
+    STOPPED --> COORDINATOR: start as coordinator Replica
+    STOPPED --> WATCHING: start as follower Replica
 
-%% A follower starts a watchdog when it enters WATCHING. A valid HEARTBEAT is
-%% one sent by the coordinator monitored by this transaction. It cancels and
-%% replaces the current watchdog, while the transaction remains in WATCHING.
-WATCHING --> WATCHING: valid HEARTBEAT
+    %% HeartbeatTick is an internal message sent by the Akka Scheduler to the
+    %% coordinator Replica's mailbox. Handling it broadcasts HEARTBEAT and
+    %% schedules the next one-shot HeartbeatTick.
+    COORDINATOR --> COORDINATOR: HeartbeatTick / broadcast HEARTBEAT and schedule next tick
 
-%% WatchdogExpired is also an internal scheduler message. "current" means its
-%% coordinator ID and generation match the active watchdog. Older cancelled
-%% watchdog messages are stale and must be ignored by the Java implementation.
-WATCHING --> ELECTION_REQUESTED: current WatchdogExpired
+    %% If the owner itself crashes, it cannot perform another transition or send
+    %% a cleanup message. This local HeartbeatTransaction simply stops running.
+    COORDINATOR --> [*]: coordinator Replica crashes
 
-%% ELECTION_REQUESTED prevents multiple election requests for the same
-%% coordinator failure. Once ElectionTransaction starts, this heartbeat
-%% transaction has completed. A new coordinator term gets a new instance.
-%% [*] used as a destination means "the transaction lifecycle ends".
-ELECTION_REQUESTED --> [*]: ElectionTransaction started
+    %% A valid network HEARTBEAT comes from the coordinator monitored by this
+    %% transaction. It keeps the follower in WATCHING and restarts its watchdog.
+    WATCHING --> WATCHING: valid HEARTBEAT / cancel and restart watchdog
+
+    %% WatchdogExpired is an internal scheduler message. The watchdog version in
+    %% the message must match the currently active version; stale timeouts caused
+    %% by earlier, cancelled watchdogs are ignored without changing state.
+    WATCHING --> ELECTION_REQUESTED: active WatchdogExpired / request ElectionTransaction
+
+    %% This state records that the follower has detected the coordinator failure
+    %% and requested exactly one election. Further timeout events are ignored.
+    note right of ELECTION_REQUESTED
+        Coordinator considered crashed.
+        ElectionTransaction requested.
+        Further watchdog timeouts are ignored.
+    end note
+
+    %% Once ElectionTransaction starts, it owns the recovery process and this
+    %% HeartbeatTransaction for the failed coordinator term has completed.
+    %% [*] as a destination represents the end of its lifecycle.
+    ELECTION_REQUESTED --> [*]: ElectionTransaction starts / heartbeat monitoring ends
