@@ -9,7 +9,7 @@ import akka.japi.pf.ReceiveBuilder;
 
 public abstract class AbstractClient extends AbstractActor {
     private final Optional<ActorRef> defaultTargetReplica;
-    private final Optional<ActorRef> listener;
+    protected final Optional<ActorRef> listener;
     private final long readTimeoutDelay;
     private final long writeTimeoutDelay;
 
@@ -93,18 +93,21 @@ public abstract class AbstractClient extends AbstractActor {
         }
     }
 
-    private static class Result implements Serializable {
+    private static class Result extends Msg {
         public final Boolean success;
         public final int index;
         public final Integer value;
         public final int fromReplica;
 
         public Result(boolean success, int index, Integer value, int fromReplica) {
+            super(null, null, null);
             this.success = success;
             this.index = index;
             this.value = value;
             this.fromReplica = fromReplica;
         }
+
+
 
         @Override
         public boolean equals(Object obj) {

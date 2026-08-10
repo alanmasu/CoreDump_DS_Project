@@ -17,7 +17,7 @@ public abstract class Transaction implements Comparable<Transaction> {
     /**
      * Represents a unique identifier for a transaction, consisting of the owner ActorRef and a progressively increasing transaction ID on the owner.
      */
-    public class TransactionId implements Serializable {
+    public static class TransactionId implements Serializable {
         final ActorRef owner;
         final int transactionId;
 

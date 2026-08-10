@@ -3,12 +3,16 @@ package it.unitn.ds;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 
+import java.util.LinkedList;
 import java.util.Optional;
 
 public class Client extends AbstractClient implements DistributedActor{
 
+    LinkedList<Transaction> activeTransactions;
+    
     Client(long readTimeoutDelay, long writeTimeoutDelay, Optional<ActorRef> defaultTargetReplica, Optional<ActorRef> listener) {
         super(readTimeoutDelay, writeTimeoutDelay, listener, defaultTargetReplica);
+        activeTransactions = new LinkedList<>();
     }
 
     public static Props props(long readTimeoutDelay, long writeTimeoutDelay, Optional<ActorRef> defaultTargetReplica) {
@@ -33,17 +37,23 @@ public class Client extends AbstractClient implements DistributedActor{
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
-                // TODO add your message handlers here .match(, )
+                .match(ReadResult.class, this::onMessage)
                 .build();
     }
 
     @Override
     public void onTransactionComplete(Transaction transaction) {
-        // TODO: implement
+        activeTransactions.remove(transaction);
     }
 
     @Override
     public void onMessage(Msg msg) {
-        
+        debug("Received message: " + msg.toString());
+        if (msg instanceof ReadResult) {
+            debug("Received ReadResult!");
+            if(listener.isPresent()) {
+                listener.get().tell(msg, self());
+            }
+        }
     }
 }           

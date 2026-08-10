@@ -13,7 +13,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     private Map<Integer, ActorRef> groupOfReplicas;
     private LinkedList<Transaction> activeTransactions;
 
-    class ReadMsg extends Msg {
+    public static class ReadMsg extends Msg {
         public final int index;
 
         public ReadMsg(TransactionId transactionId, EpochPair epochPair, ActorRef sender, int index) {
@@ -136,9 +136,14 @@ public class Replica extends AbstractReplica implements DistributedActor {
     }
 
     @Override
+    public void onTransactionComplete(Transaction transaction) {
+        activeTransactions.remove(transaction);
+    }
+
+    @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
-                .match(Msg.class, this::onMessage)
+                .match(ReadMsg.class, this::onReadMessage)
                 .build();
     }
 
@@ -156,9 +161,9 @@ public class Replica extends AbstractReplica implements DistributedActor {
         }
     }
 
-    @Override
-    public void onTransactionComplete(Transaction transaction) {
-        activeTransactions.remove(transaction);
+    public void onReadMessage(ReadMsg msg) {
+        onMessage(msg);
+        unicast(new Client.ReadResult(true, msg.index, positions[msg.index], this.id), msg.sender);
     }
     
 
