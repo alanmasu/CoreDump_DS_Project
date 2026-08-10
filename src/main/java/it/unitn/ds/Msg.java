@@ -1,5 +1,6 @@
 package it.unitn.ds;
 import java.io.Serializable;
+import java.util.Objects;
 
 import akka.actor.ActorRef;
 
@@ -25,7 +26,7 @@ public abstract class Msg implements Serializable {
                 "ownerId=" + ownerId +
                 ", ownerTransactionId=" + ownerTransactionId +
                 ", epochPair=" + epochPair +
-                ", sender=" + sender.path().name() +
+                ", sender=" + (sender == null ? "none" : sender.path()) +
                 '}';
     }
 
@@ -34,7 +35,7 @@ public abstract class Msg implements Serializable {
         int result = Integer.hashCode(ownerId);
         result = 31 * result + Integer.hashCode(ownerTransactionId);
         result = 31 * result + (epochPair != null ? epochPair.hashCode() : 0);
-        result = 31 * result + (sender != null ? sender.path().name().hashCode() : 0);
+        result = 31 * result + (sender != null ? Objects.hashCode(sender) : 0);
         return result;
     }
 
@@ -46,7 +47,7 @@ public abstract class Msg implements Serializable {
         return this.ownerId == other.ownerId &&
                this.ownerTransactionId == other.ownerTransactionId &&
                (this.epochPair != null ? this.epochPair.equals(other.epochPair) : other.epochPair == null) &&
-               (this.sender != null ? this.sender.path().name().equals(other.sender.path().name()) : other.sender == null);
+               (this.sender != null ? Objects.equals(this.sender, other.sender) : other.sender == null);
     }
 
 };
