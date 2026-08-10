@@ -5,7 +5,7 @@ import akka.actor.Props;
 
 import java.util.Optional;
 
-public class Client extends AbstractClient {
+public class Client extends AbstractClient implements DistributedActor{
 
     Client(long readTimeoutDelay, long writeTimeoutDelay, Optional<ActorRef> defaultTargetReplica, Optional<ActorRef> listener) {
         super(readTimeoutDelay, writeTimeoutDelay, listener, defaultTargetReplica);
@@ -37,4 +37,13 @@ public class Client extends AbstractClient {
                 .build();
     }
 
-}
+    @Override
+    public void onTransactionComplete(Transaction transaction) {
+        // TODO: implement
+    }
+
+    @Override
+    public void onMessage(Msg msg) {
+        
+    }
+}           

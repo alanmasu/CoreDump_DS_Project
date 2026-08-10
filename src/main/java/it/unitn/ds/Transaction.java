@@ -1,7 +1,6 @@
 package it.unitn.ds;
 
 import akka.actor.Cancellable;
-import akka.actor.AbstractActor;
 import akka.actor.ActorRef;
 
 import java.io.Serializable;
@@ -11,13 +10,17 @@ import java.util.List;
 public abstract class Transaction implements Comparable<Transaction> {
 
     public Cancellable timeout;
-    public AbstractActor owner;
+    public DistributedActor owner;
     public EpochPair epochPair;
     public TransactionId id;
 
+    /**
+     * Represents a unique identifier for a transaction, consisting of the owner ActorRef and a progressively increasing transaction ID on the owner.
+     */
     public class TransactionId implements Serializable {
         final ActorRef owner;
         final int transactionId;
+
         public TransactionId(ActorRef owner, int transactionId) {
             this.owner = owner;
             this.transactionId = transactionId;
@@ -48,7 +51,7 @@ public abstract class Transaction implements Comparable<Transaction> {
 
     public List<Msg> history;
 
-    public Transaction(int id, AbstractActor owner) {
+    public Transaction(int id, DistributedActor owner) {
         this.owner = owner;
         this.id = new TransactionId(owner.getSelf(), id);
         this.timeout = null;
@@ -93,5 +96,11 @@ public abstract class Transaction implements Comparable<Transaction> {
      * @param msg the message to process and compute the new state.
      */
     public abstract void computeState(Msg msg);
+
+    /**
+     * Starts the transaction by performing any necessary initialization or setup.
+     * This method should be implemented by subclasses to define the specific behavior for starting the transaction.
+     */
+    public abstract void start();
 
 }

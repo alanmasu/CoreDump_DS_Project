@@ -2,14 +2,26 @@ package it.unitn.ds;
 
 import akka.actor.ActorRef;
 import akka.actor.Props;
+import it.unitn.ds.Transaction.TransactionId;
 
 import java.util.Optional;
-
+import java.util.LinkedList;
 import java.util.Map;
 
-public class Replica extends AbstractReplica {
+public class Replica extends AbstractReplica implements DistributedActor {
     
     private Map<Integer, ActorRef> groupOfReplicas;
+    private LinkedList<Transaction> activeTransactions;
+
+    class ReadMsg extends Msg {
+        public final int index;
+
+        public ReadMsg(TransactionId transactionId, EpochPair epochPair, ActorRef sender, int index) {
+            super(transactionId, epochPair, sender);
+            this.index = index;
+        }
+    }
+    
 
     int positions[];
     int coordinatorID;
@@ -33,6 +45,9 @@ public class Replica extends AbstractReplica {
         super(id, minLatency, maxLatency, coordinatorBeatInterval, listener);
         positions = new int[AbstractReplica.POSITIONS_LIST_LENGTH];
         this.pendingCrash = null;
+        this.replicaStatus = CrashStatus.NONE;
+        this.crashCount = 0;
+        activeTransactions = new LinkedList<>();
     }
 
     public static Props props(int id, int minLatency, int maxLatency, int coordinatorBeatInterval) {
@@ -123,10 +138,29 @@ public class Replica extends AbstractReplica {
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
-                // TODO add your message handlers here .match(, )
+                .match(Msg.class, this::onMessage)
                 .build();
     }
 
+    @Override
+    public void onMessage(Msg msg) {
+        if(this.replicaStatus != CrashStatus.NONE){
+            crashCount++;
+            return;
+        }
+        for(Transaction transaction : activeTransactions){
+            if(transaction.id.equals(msg.transactionId)){
+                transaction.computeState(msg);
+                return;
+            }
+        }
+    }
+
+    @Override
+    public void onTransactionComplete(Transaction transaction) {
+        activeTransactions.remove(transaction);
+    }
+    
 
     /**
      * This callback method is invoked whenever a message is recieved by the replica and the parameter allows to differentiate the type of message.
