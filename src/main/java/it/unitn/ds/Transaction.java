@@ -27,17 +27,17 @@ public abstract class Transaction implements Comparable<Transaction> {
      * Represents a unique identifier for a transaction, consisting of the owner ActorRef and a progressively increasing transaction ID on the owner.
      */
     public static class TransactionId implements Serializable {
-        final ActorRef owner;
+        final ActorRef initiator;
         final int transactionId;
 
-        public TransactionId(ActorRef owner, int transactionId) {
-            this.owner = owner;
+        public TransactionId(ActorRef initiator, int transactionId) {
+            this.initiator = initiator;
             this.transactionId = transactionId;
         }
 
         @Override
         public String toString() {
-            return "<" + owner.path().name() + ", " + transactionId + ">";
+            return "<" + initiator.path().name() + ", " + transactionId + ">";
         }
 
         @Override
@@ -47,12 +47,12 @@ public abstract class Transaction implements Comparable<Transaction> {
                 return false;
             }
             TransactionId other = (TransactionId) obj;
-            return this.owner.equals(other.owner) && this.transactionId == other.transactionId;
+            return this.initiator.equals(other.initiator) && this.transactionId == other.transactionId;
         }
 
         @Override
         public int hashCode() {
-            int result = owner.hashCode();
+            int result = initiator.hashCode();
             result = 31 * result + Integer.hashCode(transactionId);
             return result;
         }
