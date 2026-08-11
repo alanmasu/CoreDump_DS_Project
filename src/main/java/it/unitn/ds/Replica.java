@@ -143,7 +143,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
-                .match(ReadMsg.class, this::onReadMessage)
+                .match(ReadMsg.class, this::onReadMsg)
+                .match(TestMsg.class, this::onTestMsg)
                 .build();
     }
 
@@ -159,13 +160,35 @@ public class Replica extends AbstractReplica implements DistributedActor {
                 return;
             }
         }
+
+        // FOR TESTING
+        if(msg instanceof TestMsg && listener.isPresent()){
+            listener.get().tell(msg, self());
+        }
     }
 
-    public void onReadMessage(ReadMsg msg) {
+    public void onReadMsg(ReadMsg msg) {
         onMessage(msg);
         unicast(new Client.ReadResult(true, msg.index, positions[msg.index], this.id), msg.sender);
     }
     
+
+    /// For testing
+    public void onTestMsg(TestMsg msg) {
+        onMessage(msg);
+        // unicast(new TestMsg(msg.transactionId, msg.epochPair, self(), msg.content), msg.sender);
+        if(msg instanceof TestMsg && listener.isPresent()){
+            TransactionId tId = new TransactionId(  msg.transactionId.owner, 
+                                                    msg.transactionId.transactionId + 1);
+
+            TestMsg responseMsg = new TestMsg(  tId, 
+                                                msg.epochPair, 
+                                                msg.sender, 
+                                                msg.content);
+
+            listener.get().tell(responseMsg, self());
+        }
+    }
 
     /**
      * This callback method is invoked whenever a message is recieved by the replica and the parameter allows to differentiate the type of message.
