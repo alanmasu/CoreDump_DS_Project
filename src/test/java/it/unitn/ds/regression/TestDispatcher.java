@@ -25,15 +25,19 @@ public class TestDispatcher {
         Logger.setLoggingEnabled(true);
 
         ActorRef replica = sys.actorOf(Replica.propsWithListener(0, 1000, 1000, 1000, probe.getRef()), "replica");
-        TestMsg testMsg = new TestMsg(new TransactionId(replica, 1), new EpochPair(0, 0), probe.getRef(), "Hello, Replica!");     
-        replica.tell(testMsg, probe.getRef());
+        TestMsg startMsg = new TestMsg(new TransactionId(replica, 1), new EpochPair(0, 0), probe.getRef(), "start");     
+        TestMsg ackMsg = new TestMsg(new TransactionId(replica, 1), new EpochPair(0, 0), probe.getRef(), "ack");     
+        replica.tell(startMsg, probe.getRef());
         
         TestMsg receivedMsg = probe.expectMsgClass(TestMsg.class);
-        assertEquals(testMsg, receivedMsg, "The received message should match the sent message.");
+        assertEquals(ackMsg.content, receivedMsg.content, "The received message should be an ack");
+        replica.tell(ackMsg, probe.getRef());
         
-        TestMsg testMsg2 = new TestMsg(new TransactionId(replica, 2), new EpochPair(0, 0), probe.getRef(), "Hello, Replica!");
+    
+        TestMsg doneMsg = new TestMsg(new TransactionId(replica, 1), new EpochPair(0, 0), probe.getRef(), "done");
         receivedMsg = probe.expectMsgClass(TestMsg.class);
-        assertEquals(testMsg2, receivedMsg, "The received message should match the sent message.");
+        assertEquals(doneMsg.content, receivedMsg.content, "The received message should match the sent message.");
+        replica.tell(doneMsg, probe.getRef());
 
         sys.terminate();
     }

@@ -175,19 +175,24 @@ public class Replica extends AbstractReplica implements DistributedActor {
 
     /// For testing
     public void onTestMsg(TestMsg msg) {
-        onMessage(msg);
-        // unicast(new TestMsg(msg.transactionId, msg.epochPair, self(), msg.content), msg.sender);
-        if(msg instanceof TestMsg && listener.isPresent()){
-            TransactionId tId = new TransactionId(  msg.transactionId.owner, 
-                                                    msg.transactionId.transactionId + 1);
-
-            TestMsg responseMsg = new TestMsg(  tId, 
-                                                msg.epochPair, 
-                                                msg.sender, 
-                                                msg.content);
-
-            listener.get().tell(responseMsg, self());
+        if(msg.content.equals("start")){
+            TransactionId tId = new TransactionId(this.getSelf(), this.activeTransactions.size() + 1);
+            TestTransaction transaction = new TestTransaction(tId.transactionId, this);
+            this.activeTransactions.add(transaction);
         }
+        onMessage(msg);
+        // // unicast(new TestMsg(msg.transactionId, msg.epochPair, self(), msg.content), msg.sender);
+        // if(msg instanceof TestMsg && listener.isPresent()){
+        //     TransactionId tId = new TransactionId(  msg.transactionId.owner, 
+        //                                             msg.transactionId.transactionId + 1);
+
+        //     TestMsg responseMsg = new TestMsg(  tId, 
+        //                                         msg.epochPair, 
+        //                                         msg.sender, 
+        //                                         msg.content);
+
+        //     listener.get().tell(responseMsg, self());
+        // }
     }
 
     /**

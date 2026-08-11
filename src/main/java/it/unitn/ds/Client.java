@@ -50,7 +50,6 @@ public class Client extends AbstractClient implements DistributedActor{
 
     @Override
     public void onMessage(Msg msg) {
-        debug("Received message: " + msg.toString());
         if (msg instanceof ReadResult && listener.isPresent()) {
             listener.get().tell(msg, self());
         }

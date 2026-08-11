@@ -13,6 +13,15 @@ public abstract class Transaction implements Comparable<Transaction> {
     public DistributedActor owner;
     public EpochPair epochPair;
     public TransactionId id;
+    public List<Msg> history;
+
+    public Transaction(int id, DistributedActor owner) {
+        this.owner = owner;
+        this.id = new TransactionId(owner.getSelf(), id);
+        this.timeout = null;
+        this.epochPair = null;
+        this.history = new ArrayList<>();
+    }
 
     /**
      * Represents a unique identifier for a transaction, consisting of the owner ActorRef and a progressively increasing transaction ID on the owner.
@@ -49,15 +58,6 @@ public abstract class Transaction implements Comparable<Transaction> {
         }
     };
 
-    public List<Msg> history;
-
-    public Transaction(int id, DistributedActor owner) {
-        this.owner = owner;
-        this.id = new TransactionId(owner.getSelf(), id);
-        this.timeout = null;
-        this.epochPair = null;
-        this.history = new ArrayList<>();
-    }
 
     @Override
     public int compareTo(Transaction other) {
@@ -96,11 +96,5 @@ public abstract class Transaction implements Comparable<Transaction> {
      * @param msg the message to process and compute the new state.
      */
     public abstract void computeState(Msg msg);
-
-    /**
-     * Starts the transaction by performing any necessary initialization or setup.
-     * This method should be implemented by subclasses to define the specific behavior for starting the transaction.
-     */
-    public abstract void start();
-
+    
 }
