@@ -3,6 +3,7 @@ package it.unitn.ds;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 import it.unitn.ds.Transaction.TransactionId;
+import it.unitn.ds.TestTransaction.TestMsg;
 
 import java.util.Optional;
 import java.util.LinkedList;

@@ -11,7 +11,7 @@ import akka.testkit.javadsl.TestKit;
 import it.unitn.ds.EpochPair;
 import it.unitn.ds.Logger;
 import it.unitn.ds.Replica;
-import it.unitn.ds.TestMsg;
+import it.unitn.ds.TestTransaction.TestMsg;
 import it.unitn.ds.Transaction.TransactionId;
 
 public class TestDispatcher {

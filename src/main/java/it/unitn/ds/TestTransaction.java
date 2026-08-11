@@ -1,9 +1,32 @@
 package it.unitn.ds;
 
+import akka.actor.ActorRef;
+
 public class TestTransaction extends Transaction {
 
     public TestTransaction(int id, DistributedActor owner) {
         super(id, owner);
+    }
+
+    /**
+     * Represents a test message for the TestTransaction, containing a string content.
+     */
+    public static class TestMsg extends Msg {
+        public final String content;
+
+        public TestMsg(TransactionId transactionId, EpochPair epochPair, ActorRef sender, String content) {
+            super(transactionId, epochPair, sender);
+            this.content = content;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (obj instanceof TestMsg) {
+                TestMsg other = (TestMsg) obj;
+                return super.equals(other) && this.content.equals(other.content);
+            }
+            return false;
+        }
     }
 
     @Override
