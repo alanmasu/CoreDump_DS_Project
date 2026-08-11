@@ -2,6 +2,7 @@ package it.unitn.ds;
 
 import akka.actor.ActorRef;
 import akka.actor.Props;
+import it.unitn.ds.Transaction.TransactionId;
 
 import java.util.LinkedList;
 import java.util.Optional;
@@ -38,6 +39,7 @@ public class Client extends AbstractClient implements DistributedActor{
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
                 .match(ReadResult.class, this::onMessage)
+                .match(TestMsg.class, this::onTestMsg)
                 .build();
     }
 
@@ -49,11 +51,31 @@ public class Client extends AbstractClient implements DistributedActor{
     @Override
     public void onMessage(Msg msg) {
         debug("Received message: " + msg.toString());
-        if (msg instanceof ReadResult) {
-            debug("Received ReadResult!");
-            if(listener.isPresent()) {
-                listener.get().tell(msg, self());
-            }
+        if (msg instanceof ReadResult && listener.isPresent()) {
+            listener.get().tell(msg, self());
+        }
+
+        // FOR TESTING
+        if(msg instanceof TestMsg && listener.isPresent()){
+            listener.get().tell(msg, self());
         }
     }
+
+    /// For testing
+    public void onTestMsg(TestMsg msg) {
+        onMessage(msg);
+        // unicast(new TestMsg(msg.transactionId, msg.epochPair, self(), msg.content), msg.sender);
+        if(msg instanceof TestMsg && listener.isPresent()){
+            TransactionId tId = new TransactionId(  msg.transactionId.owner, 
+                                                    msg.transactionId.transactionId + 1);
+
+            TestMsg responseMsg = new TestMsg(  tId, 
+                                                msg.epochPair, 
+                                                msg.sender, 
+                                                msg.content);
+
+            listener.get().tell(responseMsg, self());
+        }
+    }
+       
 }           

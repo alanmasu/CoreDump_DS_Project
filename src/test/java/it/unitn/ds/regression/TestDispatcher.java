@@ -37,4 +37,27 @@ public class TestDispatcher {
 
         sys.terminate();
     }
+
+    @Test
+    void testClientDispatcher() {
+        ActorSystem sys = ActorSystem.create("TestDispatcher");
+        TestKit probe = new TestKit(sys);
+
+        Logger.setDestinationStdout();
+        Logger.setDebugEnabled(true);
+        Logger.setLoggingEnabled(true);
+
+        ActorRef client = sys.actorOf(it.unitn.ds.Client.propsWithListener(1000, 1000, null, probe.getRef()), "client");
+        TestMsg testMsg = new TestMsg(new TransactionId(client, 1), new EpochPair(0, 0), probe.getRef(), "Hello, Client!");
+        client.tell(testMsg, probe.getRef());
+        
+        TestMsg receivedMsg = probe.expectMsgClass(TestMsg.class);
+        assertEquals(testMsg, receivedMsg, "The received message should match the sent message.");
+
+        TestMsg testMsg2 = new TestMsg(new TransactionId(client, 2), new EpochPair(0, 0), probe.getRef(), "Hello, Client!");
+        receivedMsg = probe.expectMsgClass(TestMsg.class);
+        assertEquals(testMsg2, receivedMsg, "The received message should match the sent message.");
+
+        sys.terminate();
+    }
 }
