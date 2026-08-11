@@ -14,7 +14,7 @@ public class Replica extends AbstractReplica {
     int positions[];
     int coordinatorID;
 
-    ///////////// For chashing ////////////
+    ///////////// For crashing ////////////
     private enum CrashStatus {
         NONE,
         PENDING,
@@ -24,6 +24,9 @@ public class Replica extends AbstractReplica {
     private int crashCount;
     private AbstractReplica.Crash pendingCrash;
     ////////////////////////////////////////////
+ 
+    // Manages heartbeat sending or coordinator monitoring for this Replica
+    private HeartbeatTransaction heartbeatTransaction;
 
     public Replica(int id) {
         this(id, AbstractReplica.MIN_LATENCY, AbstractReplica.MAX_LATENCY, AbstractReplica.COORDINATOR_BEAT_INTERVAL, Optional.empty());
@@ -33,6 +36,8 @@ public class Replica extends AbstractReplica {
         super(id, minLatency, maxLatency, coordinatorBeatInterval, listener);
         positions = new int[AbstractReplica.POSITIONS_LIST_LENGTH];
         this.pendingCrash = null;
+        this.replicaStatus = CrashStatus.NONE;
+        this.heartbeatTransaction = null;
     }
 
     public static Props props(int id, int minLatency, int maxLatency, int coordinatorBeatInterval) {
@@ -64,7 +69,7 @@ public class Replica extends AbstractReplica {
         for (Map.Entry<Integer, ActorRef> entry : groupOfReplicas.entrySet()) {
             target = entry.getValue();
             if(target != getSelf() || includeSelf){
-                target.tell(msg, getSelf());
+                tell(msg, target);
             }
         }
     }
@@ -92,7 +97,7 @@ public class Replica extends AbstractReplica {
         if(target == getSelf()){
             return;
         }
-        target.tell(msg, getSelf());
+        tell(msg, target);
     }
     ////////////////////////////////////////////
 
@@ -101,6 +106,10 @@ public class Replica extends AbstractReplica {
         this.groupOfReplicas = sysInit.group; 
         this.coordinatorID = sysInit.coordinator_id;
         log("Initialized with group of replicas: " + getSystemNumberOfActors() + " replicas, coordinator ID: " + coordinatorID);
+
+        // Initialize Heartbeat transaction
+        this.heartbeatTransaction = new HeartbeatTransaction(id, this);
+        this.heartbeatTransaction.start();
     }
 
     @Override
@@ -120,11 +129,59 @@ public class Replica extends AbstractReplica {
         this.replicaStatus = CrashStatus.PENDING;
     }
 
+    /**
+     * Processes a coordinator's internal scheduled tick.
+     */
+    private void onHeartbeatTick(HeartbeatTransaction.HeartbeatTick tick) {
+        if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
+            return;
+        }
+
+        heartbeatTransaction.computeState(tick);
+
+        updateCrashStatusCallback(AbstractReplica.Crash.Type.Heartbeat);
+    }
+
+    /**
+     * Process a network heartbeat received by a follower.
+     */
+    private void onHeartbeat(HeartbeatTransaction.Heartbeat heartbeat) {
+        if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
+            return;
+        }
+
+        heartbeatTransaction.computeState(heartbeat);
+
+        updateCrashStatusCallback(AbstractReplica.Crash.Type.Heartbeat);
+    }
+
+    /**
+     * Processes the follower's internal watchdog event.
+     */
+    private void onWatchdogExpired(HeartbeatTransaction.WatchdogExpired expired) {
+        if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
+            return;
+        }
+
+        heartbeatTransaction.computeState(expired);
+    }
+
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
-                // TODO add your message handlers here .match(, )
-                .build();
+            .match(
+                HeartbeatTransaction.HeartbeatTick.class,
+                this::onHeartbeatTick
+            )
+            .match(
+                HeartbeatTransaction.Heartbeat.class,
+                this::onHeartbeat
+            )
+            .match(
+                HeartbeatTransaction.WatchdogExpired.class,
+                this::onWatchdogExpired
+            )
+            .build();
     }
 
 

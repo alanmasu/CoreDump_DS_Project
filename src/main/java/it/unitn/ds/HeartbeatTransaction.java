@@ -3,9 +3,6 @@ package it.unitn.ds;
 import scala.concurrent.duration.Duration;
 import java.util.concurrent.TimeUnit;
 
-
-
-
 /**
  * Manages heartbeat behavior for a Replica.
  * 
@@ -170,7 +167,71 @@ public final class HeartbeatTransaction extends Transaction {
                          );
     }
 
+    /**
+     * Handles the coordinator's scheduled heartbeat event.
+     *
+     * A tick received in another state is stale and must not produce a heartbeat.
+     */
+    private void handleHeartbeatTick() {
+        if (state != State.COORDINATOR) {
+            return;
+        }
 
+        replica.broadcast(new Heartbeat(replica.id));
+        scheduleHeartbeatTick();
+    }
+
+
+    /**
+     * Handles a heartbeat received by a follower.
+     *
+     * Only a heartbeat from the currently expected coordinator can reset the
+     * watchdog. Heartbeats received in other states are irrelevant.
+     */
+    private void handleHeartbeat(Heartbeat heartbeat) {
+        if (state != State.WATCHING) {
+            return;
+        }
+
+        if (heartbeat.coordinatorId != replica.coordinatorID) {
+            return;
+        }
+
+        restartWatchdog();
+    }
+
+
+    /**
+     * Handles the expiration of a follower's watchdog.
+     *
+     * Only the currently active watchdog can cause a transition. Older timeout messages are stale
+     * and must be ignored.
+     */
+    private void handleWatchdogExpired(WatchdogExpired expired) {
+        if (state != State.WATCHING) {
+            return;
+        }
+
+        // This is needed to prevent previous expired watchdogs in the mailboxes to cause
+        // an undesired election. For example:
+        // - Watchdog 4 scheduled
+        // - Heartbeat arrives
+        // - Watchdog 4 cancelled
+        // - Watchdog 5 scheduled
+        // - WatchdogExpired(4) was already in the mailbox
+        // - This causes an unwanted election if versions are not checked
+        if (expired.watchdogVersion != watchdogVersion) {
+            return;
+        }
+
+        state = State.ELECTION_REQUESTED;
+
+        // The scheduled timeout has fired, so no active scheduled timeout remains.
+        timeout = null;
+
+
+        // TODO: ELECTION_TRANSACTION must be started here once it's implemented
+    }
 
     @Override
     public String getState() {
@@ -179,8 +240,24 @@ public final class HeartbeatTransaction extends Transaction {
 
     @Override
     public void computeState(Msg msg) {
-        throw new UnsupportedOperationException(
-            "HeartbeatTransaction.computeState is not implemented yet."
+        if (msg instanceof HeartbeatTick) {
+            handleHeartbeatTick();
+            return;
+        }
+
+        if (msg instanceof Heartbeat) {
+            handleHeartbeat((Heartbeat) msg);
+            return;
+        }
+
+        if (msg instanceof WatchdogExpired) {
+            handleWatchdogExpired((WatchdogExpired) msg);
+            return;
+        }
+
+        throw new IllegalArgumentException(
+            "Unsupported heartbeat message: "
+                + msg.getClass().getSimpleName()
         );
     }
 }

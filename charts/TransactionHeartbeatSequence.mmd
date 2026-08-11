@@ -57,25 +57,31 @@ sequenceDiagram
         S -->> C: HeartbeatTick
         Note right of C: FSM stays in COORDINATOR
 
-        %% HEARTBEAT is the actual network message. C sends it through the
-        %% inherited network-emulation path, represented here by N.
-        C ->> N: HEARTBEAT
+        %% Heartbeat contains the ID of the Replica that sent it.
+        C ->> N: Heartbeat(coordinatorId)
         C ->> S: scheduleOnce(heartbeatInterval, self, HeartbeatTick)
 
-        %% N adds simulated latency and preserves FIFO ordering for this
-        %% sender-destination pair before delivering HEARTBEAT to F's mailbox.
+        %% NetworkChannel delays the message and delivers it asynchronously.
         Note over N: Delayed FIFO delivery
-        N -->> F: HEARTBEAT
+        N -->> F: Heartbeat(coordinatorId)
 
-        %% A valid HEARTBEAT keeps F in WATCHING and resets its watchdog.
-        %% cancel(currentWatchdog) is diagram shorthand for calling cancel() on
-        %% the Cancellable stored by the transaction; it is not an Akka message.
-        %% Incrementing watchdogVersion makes any older WatchdogExpired message
-        %% distinguishable if cancellation happened after it entered the mailbox.
-        Note right of F: FSM stays in WATCHING
-            F ->> S: cancel(currentWatchdog)
+        %% The follower validates the sender before resetting its watchdog.
+        F ->> F: Compare Heartbeat.coordinatorId with current coordinatorID
+
+        alt Expected coordinator and FSM is WATCHING
+            %% An accepted heartbeat proves that the coordinator is alive.
+            Note right of F: FSM stays in WATCHING
+
+            %% cancel() is a local call, not a message to the Scheduler.
+            F ->> F: timeout.cancel()
+
+            %% Create a new watchdog with a newer version.
             F ->> F: watchdogVersion = watchdogVersion + 1
-            F ->> S: scheduleOnce(watchdogTimeout, self, WatchdogExpired(watchdogVersion))
+            F ->> S: timeout = scheduleOnce(watchdogTimeout, self, WatchdogExpired(watchdogVersion))
+        else Unexpected coordinator or FSM is not WATCHING
+            %% Invalid or irrelevant heartbeats cannot reset the watchdog.
+            Note right of F: Ignore Heartbeat
+        end
     end
 
 
