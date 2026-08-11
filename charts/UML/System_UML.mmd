@@ -11,9 +11,9 @@ classDiagram
     %% Legend of the notation used in this diagram
     %%   ..|>  realization  : "implements" an interface (dashed + hollow triangle)
     %%   --|>  inheritance  : "extends" a class         (solid  + hollow triangle)
-    %%   *--   composition  : the part is created by the whole and dies with it
-    %%   o--   aggregation  : the part is injected from outside, outlives the whole
-    %%   -->   association  : the source keeps a *field* referencing the target
+    %%   -->   association  : the source keeps a *field* referencing the target 
+    %%         *--   composition  : the part is created by the whole and dies with it
+    %%         o--   aggregation  : the part is injected from outside, outlives the whole
     %%   ..>   dependency   : the target only appears in a signature / local scope
     %% Diamonds (*-- and o--) are always drawn on the side of the "whole".
     %% Multiplicities read towards the far end: "1" A --> "0..*" B = one A, many B.
@@ -136,10 +136,6 @@ classDiagram
     %% ------------------------------------------------------------------
     namespace messages {
 
-        class Serializable {
-            <<interface>>
-        }
-
         class Msg {
             <<abstract>>
             +TransactionId transactionId
@@ -152,74 +148,15 @@ classDiagram
             <<TestTransaction>>
             +String content
         }
-
-        class Result {
-            <<AbstractClient>>
-            +Boolean success
-            +int index
-            +Integer value
-            +int fromReplica
-        }
-
-        class ReadResult {
-            <<AbstractClient>>
-        }
-
-        class WriteResult {
-            <<AbstractClient>>
-        }
-
-        class ReadRequest {
-            <<AbstractClient>>
-            ~ActorRef replica
-            ~int index
-        }
-
-        class WriteRequest {
-            <<AbstractClient>>
-            ~ActorRef replica
-            ~int index
-            ~int value
-        }
-
-        class Timeout {
-            <<AbstractClient>>
-            +ActorRef client
-            +ActorRef replica
-            +int index
-        }
-
-        class ReadTimeout {
-            <<AbstractClient>>
-        }
-
-        class WriteTimeout {
-            <<AbstractClient>>
-            +int value
-        }
     }
 
-    Msg ..|> Serializable
     TestMsg --|> Msg
-    Result --|> Msg
-    ReadResult --|> Result
-    WriteResult --|> Result
-    ReadRequest ..|> Serializable
-    WriteRequest ..|> Serializable
-    Timeout --|> Msg
-    ReadTimeout --|> Timeout
-    WriteTimeout --|> Timeout
+    
 
     %% Transaction has an history of the Msg 
     Transaction --> "0..*" Msg : history
     TestTransaction ..> TestMsg 
 
-
-    Replica --> "0..*" Transaction : activeTransactions
-    Client --> "0..*" Transaction : activeTransactions
-    %% ==================================================================
-    %% CROSS-CLUSTER LINKS (described, not drawn, to keep the layout clean)
-    %% ==================================================================
-    %% note for Replica "Replica and Client each own a LinkedList of active Transactions and dispatch every incoming Msg to the one whose TransactionId matches."
-    %% note for Transaction "owner is the DistributedActor that created the transaction; history aggregates the Msg objects already processed."
-    %% note for Msg "Every Msg carries the TransactionId that routes it to the right Transaction, plus the EpochPair used for total ordering."
+    %% Replica is associated with the Transaction in the sense that it holds a LinkedList of active Transactions os if the Replica dies, the Transactions die with it. 
+    Replica *-- "0..*" Transaction : activeTransactions
+    Client *-- "0..*" Transaction : activeTransactions
