@@ -24,4 +24,19 @@ public interface DistributedActor {
      * @param msg The received message.
      */
     public void onMessage(Msg msg);
+
+
+    /**
+     * Logs a message for the official log.
+     *
+     * @param message The message to be logged.
+     */
+    public void log(String message);
+
+    /**
+     * Logs a message for debugging purposes.
+     *
+     * @param message The message to be logged for debugging.
+     */
+    public void debug(String message);
 }

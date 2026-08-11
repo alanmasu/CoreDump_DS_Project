@@ -173,11 +173,11 @@ public abstract class AbstractClient extends AbstractActor {
     // Helper Methods
     // =================================================================================
 
-    void log(String msg) {
+    public void log(String msg) {
         Logger.log("[Client " + getSelf().path().name() + "] " + msg);
     }
 
-    void debug(String msg) {
+    public void debug(String msg) {
         Logger.debug("[Client " + getSelf().path().name() + "] " + msg);
     }
 

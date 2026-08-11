@@ -105,11 +105,11 @@ public abstract class AbstractReplica extends AbstractActor {
     // Helper Methods
     // =================================================================================
 
-    void log(String msg) {
+    public void log(String msg) {
         Logger.log("[Replica " + id + "] " + msg);
     }
 
-    void debug(String msg) {
+    public void debug(String msg) {
         Logger.debug("[Replica " + id + "] " + msg);
     }
 
