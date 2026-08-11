@@ -38,7 +38,6 @@ public class Client extends AbstractClient implements DistributedActor{
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
-                .match(ReadResult.class, this::onMessage)
                 .match(TestMsg.class, this::onTestMsg)
                 .build();
     }
@@ -50,31 +49,23 @@ public class Client extends AbstractClient implements DistributedActor{
 
     @Override
     public void onMessage(Msg msg) {
-        if (msg instanceof ReadResult && listener.isPresent()) {
-            listener.get().tell(msg, self());
-        }
-
-        // FOR TESTING
-        if(msg instanceof TestMsg && listener.isPresent()){
-            listener.get().tell(msg, self());
+        for(Transaction transaction : activeTransactions){
+            if(transaction.id.equals(msg.transactionId)){
+                transaction.computeState(msg);
+                return;
+            }
         }
     }
 
     /// For testing
     public void onTestMsg(TestMsg msg) {
-        onMessage(msg);
-        // unicast(new TestMsg(msg.transactionId, msg.epochPair, self(), msg.content), msg.sender);
-        if(msg instanceof TestMsg && listener.isPresent()){
-            TransactionId tId = new TransactionId(  msg.transactionId.owner, 
-                                                    msg.transactionId.transactionId + 1);
-
-            TestMsg responseMsg = new TestMsg(  tId, 
-                                                msg.epochPair, 
-                                                msg.sender, 
-                                                msg.content);
-
-            listener.get().tell(responseMsg, self());
+        if(msg.content.equals("start")){
+            TransactionId tId = new TransactionId(this.getSelf(), this.activeTransactions.size() + 1);
+            TestTransaction transaction = new TestTransaction(tId.transactionId, this);
+            this.activeTransactions.add(transaction);
         }
+        onMessage(msg);
     }
        
+
 }           
