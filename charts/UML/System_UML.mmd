@@ -108,10 +108,6 @@ classDiagram
     %% ------------------------------------------------------------------
     namespace transactions {
 
-        class Comparable {
-            <<interface>>
-        }
-
         class Transaction {
             <<abstract>>
             +Cancellable timeout
@@ -124,17 +120,6 @@ classDiagram
             +void computeState(Msg msg)*
         }
 
-        class TransactionId {
-            <<Transaction>>
-            ~ActorRef initiator
-            ~int transactionId
-        }
-
-        class EpochPair {
-            #int epoch
-            #int sequence
-        }
-
         class TestTransaction {
             +TestTransaction(int id, DistributedActor owner)
             +String getState()
@@ -143,14 +128,6 @@ classDiagram
     }
 
     TestTransaction --|> Transaction
-    %% Transaction orders itself by epochPair (a null epochPair sorts first)
-    Transaction ..|> Comparable
-    %% EpochPair orders by epoch first, then by sequence
-    EpochPair ..|> Comparable
-    %% the id is built in the constructor from owner.getSelf()
-    Transaction "1" *-- "1" TransactionId : id
-    %% epochPair is null at construction, assigned later by the coordinator flow
-    Transaction "1" o-- "0..1" EpochPair : epochPair
 
     %% ------------------------------------------------------------------
     %% 3. MESSAGE HIERARCHY
@@ -233,6 +210,13 @@ classDiagram
     ReadTimeout --|> Timeout
     WriteTimeout --|> Timeout
 
+    %% Transaction has an history of the Msg 
+    Transaction --> "0..*" Msg : history
+    TestTransaction ..> TestMsg 
+
+
+    Replica --> "0..*" Transaction : activeTransactions
+    Client --> "0..*" Transaction : activeTransactions
     %% ==================================================================
     %% CROSS-CLUSTER LINKS (described, not drawn, to keep the layout clean)
     %% ==================================================================

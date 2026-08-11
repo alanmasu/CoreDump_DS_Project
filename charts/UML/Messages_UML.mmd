@@ -1,0 +1,103 @@
+---
+config:
+  theme: forest
+---
+classDiagram
+
+    direction BT
+
+    %% ==================================================================
+    %% MESSAGE HIERARCHY
+    %%
+    %% Legend of the notation used in this diagram
+    %%   ..|>  realization  : "implements" an interface (dashed + hollow triangle)
+    %%   --|>  inheritance  : "extends" a class         (solid  + hollow triangle)
+    %% Member markers: * = abstract, + public, # protected, - private,
+    %%                 ~ package-private (Java default visibility).
+    %% Boilerplate (equals/hashCode/toString/compareTo) is omitted from every box.
+    %% Nested static classes carry the <<Outer>> stereotype naming their enclosing
+    %% class, because Mermaid has no notation for class nesting.
+    %%
+    %% SCOPE: only the message types. TransactionId and EpochPair appear as field
+    %% types but have no box here - see Transactions_UML.mmd.
+    %% The protocol messages (Update, WriteOK, Election, Synchronization,
+    %% Heartbeat) exist only in the sequence diagrams so far, not yet in Java.
+    %% Infrastructure and test plumbing (InitSystem, Crash and the listener
+    %% notification messages) are deliberately omitted.
+    %% ==================================================================
+
+    namespace messages {
+
+        class Serializable {
+            <<interface>>
+        }
+
+        class Msg {
+            <<abstract>>
+            +TransactionId transactionId
+            +EpochPair epochPair
+            +ActorRef sender
+            +Msg(TransactionId tId, EpochPair epochPair, ActorRef sender)
+        }
+
+        class TestMsg {
+            <<TestTransaction>>
+            +String content
+        }
+
+        class Result {
+            <<AbstractClient>>
+            +Boolean success
+            +int index
+            +Integer value
+            +int fromReplica
+        }
+
+        class ReadResult {
+            <<AbstractClient>>
+        }
+
+        class WriteResult {
+            <<AbstractClient>>
+        }
+
+        class ReadRequest {
+            <<AbstractClient>>
+            ~ActorRef replica
+            ~int index
+        }
+
+        class WriteRequest {
+            <<AbstractClient>>
+            ~ActorRef replica
+            ~int index
+            ~int value
+        }
+
+        class Timeout {
+            <<AbstractClient>>
+            +ActorRef client
+            +ActorRef replica
+            +int index
+        }
+
+        class ReadTimeout {
+            <<AbstractClient>>
+        }
+
+        class WriteTimeout {
+            <<AbstractClient>>
+            +int value
+        }
+    }
+
+    Msg ..|> Serializable
+    TestMsg --|> Msg
+    Result --|> Msg
+    ReadResult --|> Result
+    WriteResult --|> Result
+    ReadRequest ..|> Serializable
+    WriteRequest ..|> Serializable
+    Timeout --|> Msg
+    ReadTimeout --|> Timeout
+    WriteTimeout --|> Timeout
