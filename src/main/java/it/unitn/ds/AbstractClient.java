@@ -135,12 +135,13 @@ public abstract class AbstractClient extends AbstractActor {
         }
     }
 
-    private static class Timeout implements Serializable {
+    private static class Timeout extends Msg {
         public final ActorRef client;
         public final ActorRef replica;
         public final int index;
 
         public Timeout(ActorRef client, ActorRef replica, int index) {
+            super(null, null, null);
             this.client = client;
             this.replica = replica;
             this.index = index;
