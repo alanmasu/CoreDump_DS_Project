@@ -4,7 +4,7 @@ import akka.actor.ActorRef;
 
 public class TestTransaction extends Transaction {
 
-    public TestTransaction(int id, DistributedActor owner) {
+    public TestTransaction(TransactionId id, DistributedActor owner) {
         super(id, owner);
     }
 
@@ -39,10 +39,10 @@ public class TestTransaction extends Transaction {
         if (msg instanceof TestMsg) {
             TestMsg testMsg = (TestMsg) msg;
             if(testMsg.content.equals("start")) {
-                testMsg.sender.tell(new TestMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), "ack"), owner.getSelf());
+                owner.unicast(new TestMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), "ack"), testMsg.sender);
                 owner.debug("Start Test Transaction!");
             }else if(testMsg.content.equals("ack")) {
-                testMsg.sender.tell(new TestMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), "done"), owner.getSelf());
+                owner.unicast(new TestMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), "done"), testMsg.sender);
                 owner.debug("Ack Test Transaction!");
             }else if(testMsg.content.equals("done")) {
                 owner.debug("Done Test Transaction!");

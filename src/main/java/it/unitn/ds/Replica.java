@@ -157,7 +157,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     public void onTestMsg(TestMsg msg) {
         if(msg.content.equals("start")){
             TransactionId tId = new TransactionId(this.getSelf(), this.activeTransactions.size() + 1);
-            TestTransaction transaction = new TestTransaction(tId.transactionId, this);
+            TestTransaction transaction = new TestTransaction(tId, this);
             this.activeTransactions.add(transaction);
         }
         onMessage(msg);

@@ -15,16 +15,16 @@ public abstract class Transaction implements Comparable<Transaction> {
     public TransactionId id;
     public List<Msg> history;
 
-    public Transaction(int id, DistributedActor owner) {
+    public Transaction(TransactionId id, DistributedActor owner) {
         this.owner = owner;
-        this.id = new TransactionId(owner.getSelf(), id);
+        this.id = id;
         this.timeout = null;
         this.epochPair = null;
         this.history = new ArrayList<>();
     }
 
     /**
-     * Represents a unique identifier for a transaction, consisting of the owner ActorRef and a progressively increasing transaction ID on the owner.
+     * Represents a unique identifier for a transaction, consisting of the initiator ActorRef and a progressively increasing transaction ID on the initiator.
      */
     public static class TransactionId implements Serializable {
         final ActorRef initiator;
