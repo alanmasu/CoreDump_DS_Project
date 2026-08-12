@@ -54,11 +54,15 @@ public class Client extends AbstractClient implements DistributedActor{
     }
 
     @Override
+    public void scheduleTransaction(Transaction transaction) {
+        this.activeTransactions.add(transaction);
+    }   
+
+    @Override
     public void onTransactionComplete(Transaction transaction) {
         activeTransactions.remove(transaction);
     }
 
-    @Override
     public void onMessage(Msg msg) {
         for(Transaction transaction : activeTransactions){
             if(transaction.id.equals(msg.transactionId)){

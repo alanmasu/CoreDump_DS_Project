@@ -19,11 +19,11 @@ public interface DistributedActor {
 
 
     /**
-     * Called when a message is received and before handling it. The implementing actor can process the received message and perform any necessary actions.
+     * Schedules a transaction for processing.
      *
-     * @param msg The received message.
+     * @param transaction The transaction to be scheduled.
      */
-    public void onMessage(Msg msg);
+    public void scheduleTransaction(Transaction transaction);
 
     /**
      * Sends a message to a specific actor.
