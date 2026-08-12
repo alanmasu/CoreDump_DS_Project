@@ -140,10 +140,6 @@ public class Replica extends AbstractReplica implements DistributedActor {
 
     @Override
     public void onMessage(Msg msg) {
-        if(this.replicaStatus != CrashStatus.NONE){
-            crashCount++;
-            return;
-        }
         for(Transaction transaction : activeTransactions){
             if(transaction.id.equals(msg.transactionId)){
                 transaction.computeState(msg);
