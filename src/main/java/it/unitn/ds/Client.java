@@ -26,6 +26,16 @@ public class Client extends AbstractClient implements DistributedActor{
         return Props.create(Client.class, () -> new Client(readTimeoutDelay, writeTimeoutDelay, defaultTargetReplica, Optional.ofNullable(listener)));
     }
 
+    /**
+     * Sends a message to a specific actor.
+     * @param msg The message to be sent.
+     * @param target The actor to which the message will be sent.
+     */
+    @Override
+    public void unicast(Msg msg, ActorRef target) {
+        target.tell(msg, this.getSelf());
+    }
+
     @Override
     public void sendRead(ActorRef replica, int index) {
         // TODO: implement        

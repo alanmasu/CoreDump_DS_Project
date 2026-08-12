@@ -25,6 +25,22 @@ public interface DistributedActor {
      */
     public void onMessage(Msg msg);
 
+    /**
+     * Sends a message to a specific actor.
+     *
+     * @param msg The message to be sent.
+     * @param target The actor to which the message will be sent.
+     */
+    public void unicast(Msg msg, ActorRef target);
+
+
+    // TODO: this is not usefull for the Client Class
+    // /**
+    //  * Sends a message to all actors in the system.
+    //  *
+    //  * @param msg The message to be sent.
+    //  */
+    // public void broadcast(Msg msg);
 
     /**
      * Logs a message for the official log.
