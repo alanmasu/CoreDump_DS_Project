@@ -67,6 +67,7 @@ public class Client extends AbstractClient implements DistributedActor{
 
     @Override
     public void onTransactionComplete(Transaction transaction) {
+        debug("Transaction completed: " + transaction.id);
         Transaction nextTransaction = scheduledTransactions.poll();
         if(nextTransaction != null) {
             this.currentTransaction = nextTransaction;

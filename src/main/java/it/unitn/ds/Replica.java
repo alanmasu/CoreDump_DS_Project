@@ -127,12 +127,15 @@ public class Replica extends AbstractReplica implements DistributedActor {
 
     @Override
     public void scheduleTransaction(Transaction transaction) {
+        debug("Scheduled transaction: " + transaction.id);
         this.activeTransactions.add(transaction);
+        transaction.start();
     }
 
     @Override
     public void onTransactionComplete(Transaction transaction) {
         activeTransactions.remove(transaction);
+        debug("Transaction completed: " + transaction.id);
     }
 
     @Override
@@ -159,10 +162,11 @@ public class Replica extends AbstractReplica implements DistributedActor {
     /// For testing
     public void onTestMsg(TestMsg msg) {
         if(msg.content.equals("start")){
-            TestTransaction transaction = new TestTransaction(msg.transactionId, this);
-            this.activeTransactions.add(transaction);
+            TestTransaction transaction = new TestTransaction(msg.transactionId, this, msg, msg.sender);
+            scheduleTransaction(transaction);
+        }else{
+            onMessage(msg);
         }
-        onMessage(msg);
     }
 
     /**

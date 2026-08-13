@@ -28,23 +28,61 @@ public class TestDispatcher {
         ActorSystem sys = ActorSystem.create("TestDispatcher");
 		TestKit probe = new TestKit(sys);
         ActorRef replica = sys.actorOf(Replica.propsWithListener(0, 1000, 1000, 1000, probe.getRef()), "replica");
+        TestMsg receivedMsg;
 
         EpochPair epochPair = new EpochPair(0, 0);
-        TransactionId transactionId = new TransactionId(replica, 1);
+        TransactionId tId1 = new TransactionId(replica, 1);
+        TransactionId tId2 = new TransactionId(replica, 2);
+
+        TestMsg startMsg1 = new TestMsg(tId1, epochPair, probe.getRef(), "start");
+        TestMsg startMsg2 = new TestMsg(tId2, epochPair, probe.getRef(), "start");
+        TestMsg ackMsg1 = new TestMsg(tId1, epochPair, probe.getRef(), "ack");
+        TestMsg ackMsg2 = new TestMsg(tId2, epochPair, probe.getRef(), "ack");
+        replica.tell(startMsg1, probe.getRef());
+        replica.tell(startMsg2, probe.getRef());
         
-        TestMsg startMsg = new TestMsg(transactionId, epochPair, probe.getRef(), "start");
-        TestMsg ackMsg = new TestMsg(transactionId, epochPair, probe.getRef(), "ack");
-        replica.tell(startMsg, probe.getRef());
-        
-        TestMsg receivedMsg = probe.expectMsgClass(TestMsg.class);
-        assertEquals(ackMsg.content, receivedMsg.content, "The received message should be an ack");
-        replica.tell(ackMsg, probe.getRef());
+
+        // Expecting the replica to send back an ack for each start message
+        // 1st ack
+        receivedMsg = probe.expectMsgClass(TestMsg.class);
+        assertEquals(receivedMsg.content, "ack", "The received message should be an ack");
+        if(receivedMsg.transactionId.equals(tId1)) {
+            replica.tell(ackMsg1, probe.getRef());
+        } else {
+            replica.tell(ackMsg2, probe.getRef());
+        }
+
+        // 2nd ack
+        receivedMsg = probe.expectMsgClass(TestMsg.class);
+        assertEquals(receivedMsg.content, "ack", "The received message should be an ack");
+        if(receivedMsg.transactionId.equals(tId1)) {
+            replica.tell(ackMsg1, probe.getRef());
+        } else {
+            replica.tell(ackMsg2, probe.getRef());
+        }
         
     
-        TestMsg doneMsg = new TestMsg(transactionId, epochPair, probe.getRef(), "done");
+        // Expecting the replica to send back a done message for each transaction
+        TestMsg doneMsg1 = new TestMsg(tId1, epochPair, probe.getRef(), "done");
+        TestMsg doneMsg2 = new TestMsg(tId2, epochPair, probe.getRef(), "done");
+
+        // 1st done
         receivedMsg = probe.expectMsgClass(TestMsg.class);
-        assertEquals(doneMsg.content, receivedMsg.content, "The received message should match the sent message.");
-        replica.tell(doneMsg, probe.getRef());
+        assertEquals(receivedMsg.content, "done", "The received message should match the sent message.");
+        if(receivedMsg.transactionId.equals(tId1)) {
+            replica.tell(doneMsg1, probe.getRef());
+        } else {
+            replica.tell(doneMsg2, probe.getRef());
+        }
+
+        // 2nd done
+        receivedMsg = probe.expectMsgClass(TestMsg.class);
+        assertEquals(receivedMsg.content, "done", "The received message should match the sent message.");
+        if(receivedMsg.transactionId.equals(tId1)) {
+            replica.tell(doneMsg1, probe.getRef());
+        } else {
+            replica.tell(doneMsg2, probe.getRef());
+        }
 
         sys.terminate();
     }

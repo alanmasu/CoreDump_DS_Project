@@ -59,10 +59,11 @@ public class TestTransaction extends Transaction {
     public void computeState(Msg msg) {
         if (msg instanceof TestMsg) {
             TestMsg testMsg = (TestMsg) msg;
-            if(testMsg.content.equals("start")) {
-                owner.unicast(new TestMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), "ack"), testMsg.sender);
-                owner.debug("Start Test Transaction " + this.id);
-            }else if(testMsg.content.equals("ack")) {
+            // if(testMsg.content.equals("start")) {
+            //     owner.unicast(new TestMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), "ack"), testMsg.sender);
+            //     owner.debug("Start Test Transaction " + this.id);
+            // }else 
+                if(testMsg.content.equals("ack")) {
                 owner.unicast(new TestMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), "done"), testMsg.sender);
                 owner.debug("Ack Test Transaction " + this.id);
             }else if(testMsg.content.equals("done")) {
