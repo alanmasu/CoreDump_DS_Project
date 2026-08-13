@@ -2,7 +2,6 @@ package it.unitn.ds;
 
 import akka.actor.ActorRef;
 import akka.actor.Props;
-import it.unitn.ds.Transaction.TransactionId;
 import it.unitn.ds.TestTransaction.TestMsg;
 
 import java.util.Optional;
@@ -160,8 +159,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     /// For testing
     public void onTestMsg(TestMsg msg) {
         if(msg.content.equals("start")){
-            TransactionId tId = new TransactionId(this.getSelf(), this.activeTransactions.size() + 1);
-            TestTransaction transaction = new TestTransaction(tId, this);
+            TestTransaction transaction = new TestTransaction(msg.transactionId, this);
             this.activeTransactions.add(transaction);
         }
         onMessage(msg);

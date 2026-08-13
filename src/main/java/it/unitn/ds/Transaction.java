@@ -58,6 +58,10 @@ public abstract class Transaction implements Comparable<Transaction> {
         }
     };
 
+    /**
+     * Represents the parameters for starting a transaction asynchronously.
+     */
+    public interface StartParameters {};
 
     @Override
     public int compareTo(Transaction other) {
@@ -96,5 +100,18 @@ public abstract class Transaction implements Comparable<Transaction> {
      * @param msg the message to process and compute the new state.
      */
     public abstract void computeState(Msg msg);
+
     
+
+    /**
+     * Starts the transaction from scratch, initializing any necessary state and sending the initial messages to the relevant actors. <p>
+     * This method is usefull to start a transaction 
+     */
+    public abstract void start();
+
+    /**
+     * Sets the start parameters for the transaction.
+     * @param startParameters The start parameters to be set.
+     */
+    public abstract void setStartParameters(StartParameters startParameters);
 }
