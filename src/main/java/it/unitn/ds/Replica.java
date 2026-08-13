@@ -69,7 +69,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
         for (Map.Entry<Integer, ActorRef> entry : groupOfReplicas.entrySet()) {
             target = entry.getValue();
             if(target != getSelf() || includeSelf){
-                target.tell(msg, getSelf());
+                this.tell(msg, target);
             }
         }
     }
@@ -97,7 +97,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
         if(target == getSelf()){
             return;
         }
-        target.tell(msg, getSelf());
+        this.tell(msg, target);
     }
     ////////////////////////////////////////////
 

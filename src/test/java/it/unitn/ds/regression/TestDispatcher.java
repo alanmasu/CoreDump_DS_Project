@@ -27,7 +27,7 @@ public class TestDispatcher {
     public void testReplicaDispatcher() {
         ActorSystem sys = ActorSystem.create("TestDispatcher");
 		TestKit probe = new TestKit(sys);
-        ActorRef replica = sys.actorOf(Replica.propsWithListener(0, 1000, 1000, 1000, probe.getRef()), "replica");
+        ActorRef replica = sys.actorOf(Replica.propsWithListener(0, 100, 1000, 1000, probe.getRef()), "replica");
         TestMsg receivedMsg;
 
         EpochPair epochPair = new EpochPair(0, 0);
