@@ -9,11 +9,11 @@ import java.util.List;
 
 public abstract class Transaction implements Comparable<Transaction> {
 
-    public Cancellable timeout;
-    public DistributedActor owner;
-    public EpochPair epochPair;
-    public TransactionId id;
-    public List<Msg> history;
+    protected Cancellable timeout;  
+    protected final DistributedActor owner;  
+    protected EpochPair epochPair;  
+    private final TransactionId id;  
+    protected final List<Msg> history;  
 
     public Transaction(TransactionId id, DistributedActor owner) {
         this.owner = owner;
@@ -63,6 +63,11 @@ public abstract class Transaction implements Comparable<Transaction> {
      */
     public interface StartParameters {};
 
+    public TransactionId getId() {  
+        return id;  
+    }  
+
+
     @Override
     public int compareTo(Transaction other) {
         if (this.epochPair == null && other.epochPair == null) {
@@ -108,10 +113,4 @@ public abstract class Transaction implements Comparable<Transaction> {
      * This method is usefull to start a transaction 
      */
     public abstract void start();
-
-    /**
-     * Sets the start parameters for the transaction.
-     * @param startParameters The start parameters to be set.
-     */
-    public abstract void setStartParameters(StartParameters startParameters);
 }

@@ -56,7 +56,7 @@ public class Client extends AbstractClient implements DistributedActor{
 
     @Override
     public void scheduleTransaction(Transaction transaction) {
-        debug("Scheduled transaction: " + transaction.id);
+        debug("Scheduled transaction: " + transaction.getId());
         if(this.currentTransaction == null) {
             this.currentTransaction = transaction;
             transaction.start();
@@ -67,7 +67,7 @@ public class Client extends AbstractClient implements DistributedActor{
 
     @Override
     public void onTransactionComplete(Transaction transaction) {
-        debug("Transaction completed: " + transaction.id);
+        debug("Transaction completed: " + transaction.getId());
         Transaction nextTransaction = scheduledTransactions.poll();
         if(nextTransaction != null) {
             this.currentTransaction = nextTransaction;

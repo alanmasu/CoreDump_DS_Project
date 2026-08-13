@@ -65,9 +65,9 @@ public class TestTransaction extends Transaction {
             // }else 
                 if(testMsg.content.equals("ack")) {
                 owner.unicast(new TestMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), "done"), testMsg.sender);
-                owner.debug("Ack Test Transaction " + this.id);
+                owner.debug("Ack Test Transaction " + this.getId());
             }else if(testMsg.content.equals("done")) {
-                owner.debug("Done Test Transaction " + this.id);
+                owner.debug("Done Test Transaction " + this.getId());
                 owner.onTransactionComplete(this);
             }
         }
@@ -78,7 +78,7 @@ public class TestTransaction extends Transaction {
             owner.debug("No start parameters provided for TestTransaction. Transaction will not be started.");
             throw new IllegalStateException("No start parameters provided for TestTransaction.");
         }
-        owner.debug("Start Test Transaction " + this.id);
+        owner.debug("Start Test Transaction " + this.getId());
         TestMsg initialMsg = new TestMsg(   this.startParameters.initialMsg.transactionId, 
                                             this.startParameters.initialMsg.epochPair, 
                                             owner.getSelf(), 
