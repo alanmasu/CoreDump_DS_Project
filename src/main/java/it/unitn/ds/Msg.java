@@ -41,8 +41,7 @@ public abstract class Msg implements Serializable {
         if (obj == null || getClass() != obj.getClass()) return false;
         Msg other = (Msg) obj;
         return this.transactionId.equals(other.transactionId) &&
-               (this.epochPair != null ? this.epochPair.equals(other.epochPair) : other.epochPair == null) &&
-               (this.sender != null ? Objects.equals(this.sender, other.sender) : other.sender == null);
+               (this.epochPair != null ? this.epochPair.equals(other.epochPair) : other.epochPair == null);
     }
 
 };

@@ -106,21 +106,21 @@ public class TestDispatcher {
         client.tell(startMsg2, probe.getRef());
 
         receivedMsg = probe.expectMsgClass(TestMsg.class);
-        assertEquals(receivedMsg.content, ackMsg1.content, "The received message should be an ack");
+        assertEquals(receivedMsg, ackMsg1, "The received message should be an ack");
         client.tell(ackMsg1, probe.getRef());
 
         TestMsg doneMsg1 = new TestMsg(tId1 , epochPair, probe.getRef(), "done");
         receivedMsg = probe.expectMsgClass(TestMsg.class);
-        assertEquals(doneMsg1.content, receivedMsg.content, "The received message should match the sent message.");
+        assertEquals(doneMsg1, receivedMsg, "The received message should match the sent message.");
         client.tell(doneMsg1, probe.getRef());
 
         receivedMsg = probe.expectMsgClass(TestMsg.class);
-        assertEquals(receivedMsg.content, ackMsg2.content, "The received message should be an ack");
+        assertEquals(receivedMsg, ackMsg2, "The received message should be an ack");
         client.tell(ackMsg2, probe.getRef());
 
         TestMsg doneMsg2 = new TestMsg(tId2 , epochPair, probe.getRef(), "done");
         receivedMsg = probe.expectMsgClass(TestMsg.class);
-        assertEquals(doneMsg2.content, receivedMsg.content, "The received message should match the sent message.");
+        assertEquals(doneMsg2, receivedMsg, "The received message should match the sent message.");
         client.tell(doneMsg2, probe.getRef());
 
         sys.terminate();

@@ -86,12 +86,12 @@ public class TestTransaction extends Transaction {
         owner.unicast(initialMsg, startParameters.targetActor);
     }
 
-    @Override
-    public void setStartParameters(StartParameters startParameters) {
-        if (startParameters instanceof TestTransactionStartParameters) {
-            this.startParameters = (TestTransactionStartParameters) startParameters;
-        } else {
-            throw new IllegalArgumentException("Invalid start parameters for TestTransaction.");
+    public void setStartParameters(TestMsg initialMsg, ActorRef targetActor) {
+        if(initialMsg == null || targetActor == null) {
+            throw new IllegalArgumentException("Initial message and target actor cannot be null.");
         }
+        this.startParameters = new TestTransactionStartParameters();
+        this.startParameters.initialMsg = initialMsg;
+        this.startParameters.targetActor = targetActor;
     }
 }
