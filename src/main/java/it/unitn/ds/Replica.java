@@ -205,6 +205,10 @@ public class Replica extends AbstractReplica implements DistributedActor {
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
             .match(
+                TestMsg.class,
+                this::onTestMsg
+            )
+            .match(
                 HeartbeatTransaction.HeartbeatTickMsg.class,
                 this::onHeartbeatTick
             )
