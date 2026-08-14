@@ -2,13 +2,20 @@ package it.unitn.ds;
 
 import akka.actor.ActorRef;
 import akka.actor.Props;
+import it.unitn.ds.TestTransaction.TestMsg;
 
+import java.util.LinkedList;
 import java.util.Optional;
+import java.util.Queue;
 
-public class Client extends AbstractClient {
+public class Client extends AbstractClient implements DistributedActor{
 
+    Queue<Transaction> scheduledTransactions;
+    Transaction currentTransaction;
+    
     Client(long readTimeoutDelay, long writeTimeoutDelay, Optional<ActorRef> defaultTargetReplica, Optional<ActorRef> listener) {
         super(readTimeoutDelay, writeTimeoutDelay, listener, defaultTargetReplica);
+        scheduledTransactions = new LinkedList<>();
     }
 
     public static Props props(long readTimeoutDelay, long writeTimeoutDelay, Optional<ActorRef> defaultTargetReplica) {
@@ -18,6 +25,16 @@ public class Client extends AbstractClient {
     // Props method for automated tests
     public static Props propsWithListener(long readTimeoutDelay, long writeTimeoutDelay, Optional<ActorRef> defaultTargetReplica, ActorRef listener) {
         return Props.create(Client.class, () -> new Client(readTimeoutDelay, writeTimeoutDelay, defaultTargetReplica, Optional.ofNullable(listener)));
+    }
+
+    /**
+     * Sends a message to a specific actor.
+     * @param msg The message to be sent.
+     * @param target The actor to which the message will be sent.
+     */
+    @Override
+    public void unicast(Msg msg, ActorRef target) {
+        target.tell(msg, this.getSelf());
     }
 
     @Override
@@ -33,8 +50,46 @@ public class Client extends AbstractClient {
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
-                // TODO add your message handlers here .match(, )
+                .match(TestMsg.class, this::onTestMsg)
                 .build();
     }
 
-}
+    @Override
+    public void scheduleTransaction(Transaction transaction) {
+        debug("Scheduled transaction: " + transaction.getId());
+        if(this.currentTransaction == null) {
+            this.currentTransaction = transaction;
+            transaction.start();
+        }else {
+            this.scheduledTransactions.add(transaction);
+        }
+    }   
+
+    @Override
+    public void onTransactionComplete(Transaction transaction) {
+        debug("Transaction completed: " + transaction.getId());
+        Transaction nextTransaction = scheduledTransactions.poll();
+        if(nextTransaction != null) {
+            this.currentTransaction = nextTransaction;
+            nextTransaction.start();
+        } else {
+            this.currentTransaction = null;
+        }
+    }
+
+    public void onMessage(Msg msg) {
+        currentTransaction.computeState(msg);
+    }
+
+    /// For testing
+    public void onTestMsg(TestMsg msg) {
+        if(msg.content.equals("start")){
+            TestTransaction transaction = new TestTransaction(msg.transactionId, this, msg, msg.sender);
+            scheduleTransaction(transaction);
+        }else {
+            onMessage(msg);
+        }
+    }
+       
+
+}           

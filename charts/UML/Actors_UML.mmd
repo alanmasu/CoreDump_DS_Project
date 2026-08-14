@@ -1,0 +1,93 @@
+---
+config:
+  theme: forest
+---
+classDiagram
+
+    direction BT
+
+    %% ==================================================================
+    %% ACTOR HIERARCHY
+    %%
+    %% Legend of the notation used in this diagram
+    %%   ..|>  realization  : "implements" an interface (dashed + hollow triangle)
+    %%   --|>  inheritance  : "extends" a class         (solid  + hollow triangle)
+    %% Member markers: * = abstract, + public, # protected, - private,
+    %%                 ~ package-private (Java default visibility).
+    %% Boilerplate (equals/hashCode/toString/compareTo) and simple accessors,
+    %% getters/setters and logging helpers are omitted from every box.
+    %% Map~K→V~ is read as Map<K, V> (Mermaid generics cannot contain a comma).
+    %%
+    %% SCOPE: only the actor types. Transaction and Msg appear in signatures but
+    %% have no box here - see Transactions_UML.mmd and Messages_UML.mmd.
+    %% Infrastructure and test plumbing (NetworkChannel, Logger, Main, Props,
+    %% InitSystem, Crash/CrashType/CrashStatus and the listener notification
+    %% messages) are deliberately omitted.
+    %% ==================================================================
+
+    namespace actors {
+
+        class AbstractActor {
+            <<akka.actor>>
+        }
+
+        class DistributedActor {
+            <<interface>>
+            +ActorRef getSelf()
+            +void onTransactionComplete(Transaction transaction)
+            +void onMessage(Msg msg)
+        }
+
+        class AbstractReplica {
+            <<abstract>>
+            ~int id
+            ~boolean initialized
+            #Optional~ActorRef~ listener
+            +int getSystemNumberOfActors()*
+            +void crash(Crash how_to_crash)*
+            +void initSystem(InitSystem sysInit)*
+        }
+
+        class Replica {
+            -Map~Integer→ActorRef~ groupOfReplicas
+            -LinkedList~Transaction~ activeTransactions
+            ~int[] positions
+            ~int coordinatorID
+            +void broadcast(Msg msg, boolean includeSelf)
+            +void broadcast(Msg msg)
+            +void unicast(Msg msg, ActorRef target)
+            +void initSystem(InitSystem sysInit)
+            +int getSystemNumberOfActors()
+            +void crash(Crash how_to_crash)
+            +void onTransactionComplete(Transaction transaction)
+            +Receive createReceive()
+            +void onMessage(Msg msg)
+        }
+
+        class AbstractClient {
+            <<abstract>>
+            -Optional~ActorRef~ defaultTargetReplica
+            #Optional~ActorRef~ listener
+            -long readTimeoutDelay
+            -long writeTimeoutDelay
+            +void sendRead(ActorRef replica, int index)*
+            +void sendWrite(ActorRef replica, int index, int value)*
+        }
+
+        class Client {
+            ~LinkedList~Transaction~ activeTransactions
+            +void sendRead(ActorRef replica, int index)
+            +void sendWrite(ActorRef replica, int index, int value)
+            +Receive createReceive()
+            +void onTransactionComplete(Transaction transaction)
+            +void onMessage(Msg msg)
+        }
+    }
+
+    AbstractReplica --|> AbstractActor
+    AbstractClient --|> AbstractActor
+    Replica --|> AbstractReplica
+    Client --|> AbstractClient
+    %% both concrete actors expose the callbacks the transactions call back into
+    Replica ..|> DistributedActor
+    Client ..|> DistributedActor

@@ -29,7 +29,7 @@ public abstract class AbstractReplica extends AbstractActor {
     private final Map<ActorRef, ActorRef> channels = new HashMap<>();
 
     // === Tests ===
-    private final Optional<ActorRef> listener;
+    protected final Optional<ActorRef> listener;
 
     AbstractReplica(int id) {
         this(id, MIN_LATENCY, MAX_LATENCY, COORDINATOR_BEAT_INTERVAL, Optional.empty());
@@ -105,11 +105,11 @@ public abstract class AbstractReplica extends AbstractActor {
     // Helper Methods
     // =================================================================================
 
-    void log(String msg) {
+    public void log(String msg) {
         Logger.log("[Replica " + id + "] " + msg);
     }
 
-    void debug(String msg) {
+    public void debug(String msg) {
         Logger.debug("[Replica " + id + "] " + msg);
     }
 
