@@ -10,13 +10,11 @@ sequenceDiagram
     %% Akka actor with its own mailbox. For that reason, the diagram shows the
     %% Replica actors as participants and describes transaction states in notes.
 
-    %% S is the ActorSystem scheduler. C is the current coordinator actor.
-    %% N represents the latency-aware FIFO NetworkChannel between C and one
-    %% representative follower F. A real broadcast uses one channel per target.
+    %% S is the ActorSystem scheduler. C is the current coordinator actor and F
+    %% is one representative follower. A real broadcast targets every follower.
     participant S@{ "type" : "database", "alias": "Akka Scheduler" }
 
     participant C as Coordinator Replica
-    participant N as Network Channel
     participant F as Follower Replica
 
     %% Master and InitSystem are intentionally outside this diagram's scope.
@@ -61,12 +59,12 @@ sequenceDiagram
         Note right of C: FSM stays in COORDINATOR
 
         %% HeartbeatMsg contains the ID of the Replica that sent it.
-        C ->> N: HeartbeatMsg(coordinatorId)
+        C -->> F: HeartbeatMsg(coordinatorId)
         C ->> S: scheduleOnce(heartbeatInterval, self, HeartbeatTickMsg)
 
-        %% NetworkChannel delays the message and delivers it asynchronously.
-        Note over N: Delayed FIFO delivery
-        N -->> F: HeartbeatMsg(coordinatorId)
+        %% The direct arrow abstracts the latency-aware FIFO NetworkChannel used
+        %% by Replica.broadcast(); delivery is still delayed and asynchronous.
+        Note over C,F: Delayed FIFO delivery through the simulated network
 
         %% The follower validates the sender before resetting its watchdog.
         F ->> F: Compare HeartbeatMsg.coordinatorId with current coordinatorID
