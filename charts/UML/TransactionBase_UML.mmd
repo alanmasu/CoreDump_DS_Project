@@ -1,0 +1,156 @@
+---
+config:
+  theme: forest
+---
+classDiagram
+
+    direction BT
+
+    %% ==================================================================
+    %% TRANSACTION HIERARCHY (detailed)
+    %%
+    %% Legend of the notation used in this diagram
+    %%   ..|>  realization  : "implements" an interface (dashed + hollow triangle)
+    %%   --|>  inheritance  : "extends" a class         (solid  + hollow triangle)
+    %%   *--   composition  : the part is created by the whole and dies with it
+    %%   o--   aggregation  : the part is injected from outside, outlives the whole
+    %%   -->   association  : the source keeps a *field* referencing the target
+    %%   ..>   dependency   : the target only appears in a signature / local scope
+    %% Diamonds (*-- and o--) are always drawn on the side of the "whole".
+    %% Multiplicities read towards the far end: "1" A --> "0..*" B = one A, many B.
+    %% Member markers: * = abstract, + public, # protected, - private,
+    %%                 ~ package-private (Java default visibility).
+    %% Nested static classes carry the <<Outer>> stereotype naming their enclosing
+    %% class, because Mermaid has no notation for class nesting.
+    %%
+    %% SCOPE: the transaction model in full detail, including the boilerplate
+    %% methods that the overview diagrams omit. DistributedActor, Cancellable and
+    %% ActorRef are shown only as endpoints, without their own members - see
+    %% Actors_UML.mmd. The message hierarchy is in Messages_UML.mmd; only Msg and
+    %% TestMsg appear here, because the transactions consume them directly.
+    %% ==================================================================
+
+    %% ------------------------------------------------------------------
+    %% The transactions themselves
+    %% ------------------------------------------------------------------
+    class Transaction {
+        <<abstract>>
+        +Cancellable timeout
+        +DistributedActor owner
+        +EpochPair epochPair
+        +TransactionId id
+        +List~Msg~ history
+        +Transaction(int id, DistributedActor owner)
+        +int compareTo(Transaction other)
+        +String toString()
+        +String getState()*
+        +void computeState(Msg msg)*
+    }
+
+    %% ------------------------------------------------------------------
+    %% Value objects carried by every transaction
+    %% ------------------------------------------------------------------
+    class TransactionId {
+        <<Transaction>>
+        ~final ActorRef initiator
+        ~final int transactionId
+        +TransactionId(ActorRef initiator, int transactionId)
+        +String toString()
+        +boolean equals(Object obj)
+        +int hashCode()
+    }
+
+    class EpochPair {
+        #final int epoch
+        #final int sequence
+        +EpochPair(int epoch, int sequence)
+        +int compareTo(EpochPair other)
+        +int getEpoch()
+        +int getSequence()
+        +String toString()
+        +boolean equals(Object obj)
+        +int hashCode()
+    }
+
+    %% ------------------------------------------------------------------
+    %% What the transactions consume and produce
+    %% ------------------------------------------------------------------
+    class Msg {
+        <<abstract>>
+        +final TransactionId transactionId
+        +final EpochPair epochPair
+        +final ActorRef sender
+        +Msg(TransactionId tId, EpochPair epochPair, ActorRef sender)
+        +String toString()
+        +boolean equals(Object obj)
+        +int hashCode()
+    }
+
+    %% ------------------------------------------------------------------
+    %% Endpoints defined elsewhere, shown without members
+    %% ------------------------------------------------------------------
+    class DistributedActor {
+        <<interface>>
+    }
+
+    class Comparable {
+        <<interface>>
+    }
+
+    class Serializable {
+        <<interface>>
+    }
+
+    class ActorRef {
+        <<akka.actor>>
+    }
+
+    %% ==================================================================
+    %% REALIZATION - "implements"
+    %% ==================================================================
+    %% Transaction implements Comparable<Transaction>: orders by epochPair,
+    %% a null epochPair sorting before any real one
+    Transaction ..|> Comparable
+    %% EpochPair implements Comparable<EpochPair>: epoch first, then sequence
+    EpochPair ..|> Comparable
+    %% everything that crosses the network must be serializable
+    EpochPair ..|> Serializable
+    TransactionId ..|> Serializable
+    Msg ..|> Serializable
+
+    %% ==================================================================
+    %% COMPOSITION - the whole creates the part and the part dies with it
+    %% ==================================================================
+    %% the id is built inside the Transaction constructor from owner.getSelf()
+    Transaction "1" *-- "1" TransactionId : id
+    %% every message is stamped with the id of the transaction it belongs to
+    Msg "1" *-- "1" TransactionId : transactionId
+
+    %% ==================================================================
+    %% AGGREGATION - the part is supplied from outside / shared
+    %% ==================================================================
+    %% epochPair is null at construction, assigned later by the coordinator flow
+    Transaction "1" o-- "0..1" EpochPair : epochPair
+    Msg "1" o-- "0..1" EpochPair : epochPair
+    %% the transaction keeps the messages it has processed, but they are shared
+    %% with the network and with the other endpoint of the exchange
+    Transaction "1" o-- "0..*" Msg : history
+
+    %% ==================================================================
+    %% ASSOCIATION - plain field references
+    %% ==================================================================
+    %% the actor that created the transaction; it outlives the transaction
+    Transaction "1" --> "1" DistributedActor : owner
+    %% the actor that started the transaction, half of its unique id
+    TransactionId "1" --> "1" ActorRef : initiator
+    Msg "1" --> "0..1" ActorRef : sender
+
+    %% ==================================================================
+    %% DEPENDENCY - transient use (parameter, local variable, "new")
+    %% ==================================================================
+    %% the owning actor routes each Msg here by matching TransactionId
+    Transaction ..> Msg : computeState(msg)
+    %% compareTo() delegates the ordering to EpochPair.compareTo()
+    Transaction ..> EpochPair : compareTo delegates
+    %% the test transaction answers "start" with "ack" and "ack" with "done"
+    %% on "done" the transaction removes itself from the actor's active list

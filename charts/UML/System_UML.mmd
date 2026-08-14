@@ -1,0 +1,162 @@
+---
+config:
+  theme: forest
+---
+classDiagram
+
+    direction BT
+
+
+    %% ==================================================================
+    %% Legend of the notation used in this diagram
+    %%   ..|>  realization  : "implements" an interface (dashed + hollow triangle)
+    %%   --|>  inheritance  : "extends" a class         (solid  + hollow triangle)
+    %%   -->   association  : the source keeps a *field* referencing the target 
+    %%         *--   composition  : the part is created by the whole and dies with it
+    %%         o--   aggregation  : the part is injected from outside, outlives the whole
+    %%   ..>   dependency   : the target only appears in a signature / local scope
+    %% Diamonds (*-- and o--) are always drawn on the side of the "whole".
+    %% Multiplicities read towards the far end: "1" A --> "0..*" B = one A, many B.
+    %% Member markers: * = abstract, + public, # protected, - private,
+    %%                 ~ package-private (Java default visibility).
+    %% Boilerplate (equals/hashCode/toString/compareTo) and simple accessors,
+    %% getters/setters and logging helpers are omitted from every box.
+    %% Nested static classes carry the <<Outer>> stereotype naming their enclosing
+    %% class, because Mermaid has no notation for class nesting.
+    %% Map~K→V~ is read as Map<K, V> (Mermaid generics cannot contain a comma).
+    %%
+    %% SCOPE: the three hierarchies below are drawn as SEPARATE, unconnected
+    %% clusters on purpose, so that each one stays readable. The links that do
+    %% exist between them in the code (an actor holds Transactions, a Transaction
+    %% consumes Msg) are described in the notes instead of being drawn.
+    %% Infrastructure and test plumbing (NetworkChannel, Logger, Main, Props,
+    %% InitSystem, Crash/CrashType/CrashStatus and the listener notification
+    %% messages) are deliberately omitted.
+    %% ==================================================================
+    %% ------------------------------------------------------------------
+    %% 1. ACTOR HIERARCHY
+    %% ------------------------------------------------------------------
+    namespace actors {
+
+        class AbstractActor {
+            <<akka.actor>>
+        }
+
+        class DistributedActor {
+            <<interface>>
+            +ActorRef getSelf()
+            +void onTransactionComplete(Transaction transaction)
+            +void onMessage(Msg msg)
+        }
+
+        class AbstractReplica {
+            <<abstract>>
+            ~int id
+            ~boolean initialized
+            #Optional~ActorRef~ listener
+            +int getSystemNumberOfActors()*
+            +void crash(Crash how_to_crash)*
+            +void initSystem(InitSystem sysInit)*
+        }
+
+        class Replica {
+            -Map~Integer→ActorRef~ groupOfReplicas
+            -LinkedList~Transaction~ activeTransactions
+            ~int[] positions
+            ~int coordinatorID
+            +void broadcast(Msg msg, boolean includeSelf)
+            +void broadcast(Msg msg)
+            +void unicast(Msg msg, ActorRef target)
+            +void initSystem(InitSystem sysInit)
+            +int getSystemNumberOfActors()
+            +void crash(Crash how_to_crash)
+            +void onTransactionComplete(Transaction transaction)
+            +Receive createReceive()
+            +void onMessage(Msg msg)
+        }
+
+        class AbstractClient {
+            <<abstract>>
+            -Optional~ActorRef~ defaultTargetReplica
+            #Optional~ActorRef~ listener
+            -long readTimeoutDelay
+            -long writeTimeoutDelay
+            +void sendRead(ActorRef replica, int index)*
+            +void sendWrite(ActorRef replica, int index, int value)*
+        }
+
+        class Client {
+            ~LinkedList~Transaction~ activeTransactions
+            +void sendRead(ActorRef replica, int index)
+            +void sendWrite(ActorRef replica, int index, int value)
+            +Receive createReceive()
+            +void onTransactionComplete(Transaction transaction)
+            +void onMessage(Msg msg)
+        }
+    }
+
+    AbstractReplica --|> AbstractActor
+    AbstractClient --|> AbstractActor
+    Replica --|> AbstractReplica
+    Client --|> AbstractClient
+    %% both concrete actors expose the callbacks the transactions call back into
+    Replica ..|> DistributedActor
+    Client ..|> DistributedActor
+
+    %% ------------------------------------------------------------------
+    %% 2. TRANSACTION HIERARCHY
+    %% ------------------------------------------------------------------
+    namespace transactions {
+
+        class Transaction {
+            <<abstract>>
+            +Cancellable timeout
+            +DistributedActor owner
+            +EpochPair epochPair
+            +TransactionId id
+            +List~Msg~ history
+            +Transaction(int id, DistributedActor owner)
+            +String getState()*
+            +void computeState(Msg msg)*
+        }
+
+        class TestTransaction {
+            +TestTransaction(int id, DistributedActor owner)
+            +String getState()
+            +void computeState(Msg msg)
+        }
+    }
+
+    TestTransaction --|> Transaction
+
+    %% ------------------------------------------------------------------
+    %% 3. MESSAGE HIERARCHY
+    %% NOTE: the protocol messages (Update, WriteOK, Election, Synchronization,
+    %% Heartbeat) exist only in the sequence diagrams so far, not yet in Java.
+    %% ------------------------------------------------------------------
+    namespace messages {
+
+        class Msg {
+            <<abstract>>
+            +TransactionId transactionId
+            +EpochPair epochPair
+            +ActorRef sender
+            +Msg(TransactionId tId, EpochPair epochPair, ActorRef sender)
+        }
+
+        class TestMsg {
+            <<TestTransaction>>
+            +String content
+        }
+    }
+
+    TestMsg --|> Msg
+    
+
+    %% Transaction has an history of the Msg 
+    Transaction --> "0..*" Msg : history
+    TestTransaction ..> TestMsg 
+
+    %% Replica is associated with the Transaction in the sense that it holds a LinkedList of active Transactions os if the Replica dies, the Transactions die with it. 
+    Replica *-- "0..*" Transaction : activeTransactions
+    Client *-- "0..*" Transaction : activeTransactions
