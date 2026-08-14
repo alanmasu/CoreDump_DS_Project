@@ -13,7 +13,7 @@ sequenceDiagram
     %% S is the ActorSystem scheduler. C is the current coordinator actor.
     %% N represents the latency-aware FIFO NetworkChannel between C and one
     %% representative follower F. A real broadcast uses one channel per target.
-    participant S as Akka Scheduler@{ "type" : "database" }
+    participant S@{ "type" : "database", "alias": "Akka Scheduler" }
 
     participant C as Coordinator Replica
     participant N as Network Channel
@@ -24,7 +24,9 @@ sequenceDiagram
     %% and knows both the group membership and current coordinator ID.
     Note over C,F: All replicas have processed InitSystem
 
-    %% These notes connect the message exchange to TransactionHeartbeatFSM.mmd.
+    %% These notes connect the message exchange to
+    %% TransactionHeartbeatCoordinatorFSM.mmd and
+    %% TransactionHeartbeatFollowerFSM.mmd.
     %% One HeartbeatTransaction is active per Replica for one coordinator term.
     Note over C: HeartbeatTransaction state = COORDINATOR
     Note over F: HeartbeatTransaction state = WATCHING
@@ -34,40 +36,40 @@ sequenceDiagram
     %% protocol message. "self" means the scheduling Replica's own ActorRef.
     %% The full Java call will also supply a dispatcher and sender ActorRef.
     par Coordinator timer startup
-        C ->> S: scheduleOnce(heartbeatInterval, self, HeartbeatTick)
+        C ->> S: scheduleOnce(heartbeatInterval, self, HeartbeatTickMsg)
     and Follower watchdog startup
         %% watchdogVersion is local to F and starts at 0. Every newly armed
-        %% watchdog increments it before placing that value in WatchdogExpired.
+        %% watchdog increments it before placing that value in WatchdogExpiredMsg.
         %% The value never travels through NetworkChannel or to another Replica.
         F ->> F: watchdogVersion = watchdogVersion + 1
-        F ->> S: scheduleOnce(watchdogTimeout, self, WatchdogExpired(watchdogVersion))
+        F ->> S: scheduleOnce(watchdogTimeout, self, WatchdogExpiredMsg(watchdogVersion))
     end
 
     %% Akka is not a real-time system, so startup call order alone cannot ensure
-    %% that HEARTBEAT arrives before WatchdogExpired. The watchdog duration must
+    %% that HeartbeatMsg arrives before WatchdogExpiredMsg. The watchdog duration must
     %% leave room for the heartbeat interval, channel latency, and scheduling
     %% tolerance. The exact timeout formula will be defined in one Java helper.
     Note over S,F: watchdogTimeout is longer than the heartbeat interval + delivery tolerance
 
     %% We use recursive one-shot scheduling rather than a repeating fixed-rate
-    %% task: handling one HeartbeatTick sends HEARTBEAT and schedules the next
-    %% HeartbeatTick. This makes timer ownership and cancellation explicit.
+    %% task: handling one HeartbeatTickMsg sends HeartbeatMsg and schedules the next
+    %% HeartbeatTickMsg. This makes timer ownership and cancellation explicit.
     loop While the coordinator is healthy
         %% -->> represents delayed/asynchronous delivery into C's actor mailbox.
-        %% HeartbeatTick is internal; it is never broadcast to followers.
-        S -->> C: HeartbeatTick
+        %% HeartbeatTickMsg is internal; it is never broadcast to followers.
+        S -->> C: HeartbeatTickMsg
         Note right of C: FSM stays in COORDINATOR
 
-        %% Heartbeat contains the ID of the Replica that sent it.
-        C ->> N: Heartbeat(coordinatorId)
-        C ->> S: scheduleOnce(heartbeatInterval, self, HeartbeatTick)
+        %% HeartbeatMsg contains the ID of the Replica that sent it.
+        C ->> N: HeartbeatMsg(coordinatorId)
+        C ->> S: scheduleOnce(heartbeatInterval, self, HeartbeatTickMsg)
 
         %% NetworkChannel delays the message and delivers it asynchronously.
         Note over N: Delayed FIFO delivery
-        N -->> F: Heartbeat(coordinatorId)
+        N -->> F: HeartbeatMsg(coordinatorId)
 
         %% The follower validates the sender before resetting its watchdog.
-        F ->> F: Compare Heartbeat.coordinatorId with current coordinatorID
+        F ->> F: Compare HeartbeatMsg.coordinatorId with current coordinatorID
 
         alt Expected coordinator and FSM is WATCHING
             %% An accepted heartbeat proves that the coordinator is alive.
@@ -78,10 +80,10 @@ sequenceDiagram
 
             %% Create a new watchdog with a newer version.
             F ->> F: watchdogVersion = watchdogVersion + 1
-            F ->> S: timeout = scheduleOnce(watchdogTimeout, self, WatchdogExpired(watchdogVersion))
+            F ->> S: timeout = scheduleOnce(watchdogTimeout, self, WatchdogExpiredMsg(watchdogVersion))
         else Unexpected coordinator or FSM is not WATCHING
             %% Invalid or irrelevant heartbeats cannot reset the watchdog.
-            Note right of F: Ignore Heartbeat
+            Note right of F: Ignore HeartbeatMsg
         end
     end
 
@@ -91,14 +93,14 @@ sequenceDiagram
     Note over C,F: Coordinator crashes and sends no more HEARTBEAT messages
 
     %% The crashed coordinator cannot cancel its timer or perform another state
-    %% transition. A HeartbeatTick that was scheduled before the crash may still
-    %% be sent, but the crashed Replica ignores it and broadcasts no HEARTBEAT.
+    %% transition. A HeartbeatTickMsg that was scheduled before the crash may still
+    %% be sent, but the crashed Replica ignores it and broadcasts no HeartbeatMsg.
     Note right of C: Replica is crashed, HeartbeatTransaction no longer runs
-    S --x C: pending HeartbeatTick is ignored
+    S --x C: pending HeartbeatTickMsg is ignored
 
-    %% Since no valid HEARTBEAT resets the follower's watchdog, Akka
-    %% eventually delivers the WatchdogExpired object created by scheduleOnce().
-    S -->> F: WatchdogExpired(watchdogVersion)
+    %% Since no valid HeartbeatMsg resets the follower's watchdog, Akka eventually
+    %% delivers the WatchdogExpiredMsg object created by scheduleOnce().
+    S -->> F: WatchdogExpiredMsg(watchdogVersion)
     F ->> F: Compare messageVersion with current watchdogVersion
 
     %% The version check distinguishes the active watchdog from a cancelled
@@ -108,15 +110,15 @@ sequenceDiagram
         %% additional elections.
         Note right of F: FSM moves from WATCHING to ELECTION_REQUESTED
 
-        %% ElectionTransaction is a normal Java object owned by the same Replica,
-        %% so this self-arrow represents an internal constructor/start call.
-        F ->> F: Create and start ElectionTransaction
+        %% ElectionTransaction will be a normal Java object owned by the same
+        %% Replica. Its construction and startup are not implemented yet.
+        F ->> F: Future: create and start ElectionTransaction
 
-        %% The heartbeat transaction belonged to the failed coordinator term.
-        %% ElectionTransaction now owns the recovery process, so this instance ends.
-        Note right of F: HeartbeatTransaction ends
+        %% Once that integration exists, ElectionTransaction will own the recovery
+        %% process and this heartbeat transaction will end.
+        Note right of F: Intended handoff: HeartbeatTransaction ends
     else Stale version or election already requested
-        %% Either the watchdog was reset by a newer HEARTBEAT, or another valid
+        %% Either the watchdog was reset by a newer HeartbeatMsg, or another valid
         %% timeout has already started an election. No action should be repeated.
-        Note right of F: Ignore WatchdogExpired
+        Note right of F: Ignore WatchdogExpiredMsg
     end
