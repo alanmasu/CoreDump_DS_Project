@@ -2,14 +2,17 @@ package it.unitn.ds;
 
 import akka.actor.ActorRef;
 import akka.actor.Props;
+
 import it.unitn.ds.TestTransaction.TestMsg;
+import it.unitn.ds.Transaction.TransactionId;
 
 import java.util.Optional;
 import java.util.LinkedList;
 import java.util.Map;
 
 public class Replica extends AbstractReplica implements DistributedActor {
-    
+   
+    private static final int INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE = 0;
     private Map<Integer, ActorRef> groupOfReplicas;
     private LinkedList<Transaction> activeTransactions;
 
@@ -110,8 +113,24 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.coordinatorID = sysInit.coordinator_id;
         log("Initialized with group of replicas: " + getSystemNumberOfActors() + " replicas, coordinator ID: " + coordinatorID);
 
-        // Initialize Heartbeat transaction
-        this.heartbeatTransaction = new HeartbeatTransaction(id, this);
+        // All replicas will use the coordinator-created identity for this heartbeat term.
+        ActorRef coordinator = groupOfReplicas.get(coordinatorID);
+        if (coordinator == null) {
+            throw new IllegalStateException(
+                "Cannot initialize heartbeat: coordinator is not in the replica group."
+            );
+        }
+
+        TransactionId heartbeatTransactionId = new TransactionId(
+            coordinator,
+            INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE
+        );
+
+        this.heartbeatTransaction = new HeartbeatTransaction(
+            heartbeatTransactionId,
+            this
+        );
+
         this.heartbeatTransaction.start();
     }
 

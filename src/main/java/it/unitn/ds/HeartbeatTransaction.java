@@ -2,6 +2,9 @@ package it.unitn.ds;
 
 import scala.concurrent.duration.Duration;
 import java.util.concurrent.TimeUnit;
+import it.unitn.ds.Transaction.TransactionId;
+
+import akka.actor.ActorRef;
 
 /**
  * Manages heartbeat behavior for a Replica.
@@ -25,39 +28,81 @@ public final class HeartbeatTransaction extends Transaction {
     }
 
     /**
-     * Internal event sent by the Akka Scheduler to the coordinator Replica.
-     * 
-     * It contains no data: receiving the event simply means that it is time to
-     * broadcast the next heartbeat.
+     * Internal scheduler message telling the coordinator to broadcast its next
+     * heartbeat.
+     *
+     * <p>This message is delivered only to the owning Replica's mailbox. It is not
+     * sent through the network channel. Its transaction ID identifies the
+     * heartbeat transaction for the current coordinator term.</p>
      */
-    public static final class HeartbeatTick extends Msg {}
+    public static final class HeartbeatTickMsg extends Msg {
+        
+
+        /**
+         * Creates a heartbeat tick for the given heartbeat transaction.
+         *
+         * @param transactionId identifier of the current heartbeat transaction
+         * @param sender coordinator Replica that scheduled the tick
+         */
+        public HeartbeatTickMsg(
+            TransactionId transactionId,
+            ActorRef sender
+        ) {
+            super(transactionId, null, sender);
+        }
+    }
+
 
     /**
-     * Network Message broadcast by the coordinator to follower Replicas.
+     * Network message broadcast by the coordinator to announce that it is alive.
+     *
+     * <p>Every replica participating in the same coordinator term uses the same
+     * transaction ID. Followers accept the message only when
+     * {@code coordinatorId} matches their currently expected coordinator.</p>
      */
-    public static final class Heartbeat extends Msg {
+    public static final class HeartbeatMsg extends Msg {
         
         public final int coordinatorId;
 
-        public Heartbeat(int coordinatorId) {
+        /**
+         * Creates a heartbeat sent by the current coordinator.
+         *
+         * @param transactionId identifier of the current heartbeat transaction
+         * @param sender coordinator Replica broadcasting the heartbeat
+         * @param coordinatorId numeric identifier of the current coordinator
+         */
+        public HeartbeatMsg(TransactionId transactionId, ActorRef sender, int coordinatorId) {
+            super(transactionId, null, sender);
             this.coordinatorId = coordinatorId;
         }
     }
 
+
     /**
-     * Internal event sent by the Akka Scheduler when a follower's watchdog expires.
-     * 
-     * The version identifies the watchdog that created this event. It allows the
-     * transaction to distinguish the active timeout from an older stale timeout.
+     * Internal scheduler message indicating that a follower's watchdog expired.
+     *
+     * <p>The transaction ID identifies the coordinator-term transaction, while
+     * {@code watchdogVersion} identifies one particular watchdog generation.
+     * This distinction allows the transaction to reject an older timeout message
+     * that entered the mailbox before its timer was cancelled.</p>
      */
-    public static final class WatchdogExpired extends Msg {
+    public static final class WatchdogExpiredMsg extends Msg {
 
         public final long watchdogVersion;
 
-        public WatchdogExpired(long watchdogVersion) {
+        /**
+         * Creates a watchdog-expiration message.
+         *
+         * @param transactionId identifier of the current heartbeat transaction
+         * @param sender follower Replica that scheduled the watchdog
+         * @param watchdogVersion generation of the watchdog that expired
+         */
+        public WatchdogExpiredMsg(TransactionId transactionId, ActorRef sender, long watchdogVersion) {
+            super(transactionId, null, sender);
             this.watchdogVersion = watchdogVersion;
         }
     }
+
 
     // The transaction always starts inactive
     private State state;
@@ -78,7 +123,7 @@ public final class HeartbeatTransaction extends Transaction {
     private long watchdogVersion;
 
 
-    public HeartbeatTransaction(int transactionId, Replica owner) {
+    public HeartbeatTransaction(TransactionId transactionId, Replica owner) {
         super(transactionId, owner);
 
         this.replica = owner;
