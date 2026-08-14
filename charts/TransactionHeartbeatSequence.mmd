@@ -13,7 +13,8 @@ sequenceDiagram
     %% S is the ActorSystem scheduler. C is the current coordinator actor.
     %% N represents the latency-aware FIFO NetworkChannel between C and one
     %% representative follower F. A real broadcast uses one channel per target.
-    participant S as Akka Scheduler
+    participant S as Akka Scheduler@{ "type" : "database" }
+
     participant C as Coordinator Replica
     participant N as Network Channel
     participant F as Follower Replica
