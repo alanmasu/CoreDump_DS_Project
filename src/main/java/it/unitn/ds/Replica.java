@@ -3,6 +3,7 @@ package it.unitn.ds;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 import it.unitn.ds.TestTransaction.TestMsg;
+import it.unitn.ds.Transaction.TransactionId;
 
 import java.util.Optional;
 import java.util.LinkedList;
@@ -12,6 +13,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     
     private Map<Integer, ActorRef> groupOfReplicas;
     private LinkedList<Transaction> activeTransactions;
+    private int transactionCounter;
 
     int positions[];
     int coordinatorID;
@@ -38,6 +40,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.replicaStatus = CrashStatus.NONE;
         this.crashCount = 0;
         activeTransactions = new LinkedList<>();
+        transactionCounter = 0;
     }
 
     public static Props props(int id, int minLatency, int maxLatency, int coordinatorBeatInterval) {
@@ -136,6 +139,11 @@ public class Replica extends AbstractReplica implements DistributedActor {
     public void onTransactionComplete(Transaction transaction) {
         activeTransactions.remove(transaction);
         debug("Transaction completed: " + transaction.getId());
+    }
+
+    @Override
+    public TransactionId getNextTransactionId() {
+        return new TransactionId(this.getSelf(), transactionCounter++);
     }
 
     @Override

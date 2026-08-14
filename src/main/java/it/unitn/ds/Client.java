@@ -3,6 +3,7 @@ package it.unitn.ds;
 import akka.actor.ActorRef;
 import akka.actor.Props;
 import it.unitn.ds.TestTransaction.TestMsg;
+import it.unitn.ds.Transaction.TransactionId;
 
 import java.util.LinkedList;
 import java.util.Optional;
@@ -10,12 +11,15 @@ import java.util.Queue;
 
 public class Client extends AbstractClient implements DistributedActor{
 
+    private int transactionCounter;
+
     Queue<Transaction> scheduledTransactions;
     Transaction currentTransaction;
     
     Client(long readTimeoutDelay, long writeTimeoutDelay, Optional<ActorRef> defaultTargetReplica, Optional<ActorRef> listener) {
         super(readTimeoutDelay, writeTimeoutDelay, listener, defaultTargetReplica);
         scheduledTransactions = new LinkedList<>();
+        transactionCounter = 0;
     }
 
     public static Props props(long readTimeoutDelay, long writeTimeoutDelay, Optional<ActorRef> defaultTargetReplica) {
@@ -45,6 +49,11 @@ public class Client extends AbstractClient implements DistributedActor{
     @Override
     public void sendWrite(ActorRef replica, int index, int value) {
         // TODO: implement
+    }
+
+    @Override
+    public TransactionId getNextTransactionId() {
+        return new TransactionId(this.getSelf(), transactionCounter++);
     }
 
     @Override
