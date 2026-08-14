@@ -131,7 +131,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
             this
         );
 
-        this.heartbeatTransaction.start();
+        scheduleTransaction(this.heartbeatTransaction);
     }
 
     @Override
@@ -167,12 +167,12 @@ public class Replica extends AbstractReplica implements DistributedActor {
     /**
      * Processes a coordinator's internal scheduled tick.
      */
-    private void onHeartbeatTick(HeartbeatTransaction.HeartbeatTick tick) {
+    private void onHeartbeatTick(HeartbeatTransaction.HeartbeatTickMsg tick) {
         if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
             return;
         }
 
-        heartbeatTransaction.computeState(tick);
+        onMessage(tick);
 
         updateCrashStatusCallback(AbstractReplica.Crash.Type.Heartbeat);
     }
@@ -180,12 +180,12 @@ public class Replica extends AbstractReplica implements DistributedActor {
     /**
      * Process a network heartbeat received by a follower.
      */
-    private void onHeartbeat(HeartbeatTransaction.Heartbeat heartbeat) {
+    private void onHeartbeat(HeartbeatTransaction.HeartbeatMsg heartbeat) {
         if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
             return;
         }
 
-        heartbeatTransaction.computeState(heartbeat);
+        onMessage(heartbeat);
 
         updateCrashStatusCallback(AbstractReplica.Crash.Type.Heartbeat);
     }
@@ -193,27 +193,27 @@ public class Replica extends AbstractReplica implements DistributedActor {
     /**
      * Processes the follower's internal watchdog event.
      */
-    private void onWatchdogExpired(HeartbeatTransaction.WatchdogExpired expired) {
+    private void onWatchdogExpired(HeartbeatTransaction.WatchdogExpiredMsg expired) {
         if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
             return;
         }
 
-        heartbeatTransaction.computeState(expired);
+        onMessage(expired);
     }
 
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
             .match(
-                HeartbeatTransaction.HeartbeatTick.class,
+                HeartbeatTransaction.HeartbeatTickMsg.class,
                 this::onHeartbeatTick
             )
             .match(
-                HeartbeatTransaction.Heartbeat.class,
+                HeartbeatTransaction.HeartbeatMsg.class,
                 this::onHeartbeat
             )
             .match(
-                HeartbeatTransaction.WatchdogExpired.class,
+                HeartbeatTransaction.WatchdogExpiredMsg.class,
                 this::onWatchdogExpired
             )
             .build();

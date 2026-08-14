@@ -167,8 +167,9 @@ public final class HeartbeatTransaction extends Transaction {
     /**
      * Schedules one HeartbeatTick for the coordinator Replica.
      * 
-     * The tick is sent to the Replica's mailbox; HeartbeatTransaction is not
-     * itself an actor and therefore has no mailbox.
+     * The tick carries this transaction's ID so the Replica can route it back to
+     * the correct heartbeat transaction. It is delivered locally to the Replica's
+     * mailbox and never crosses the network channel.
      */
     private void scheduleHeartbeatTick() {
         timeout = replica.getContext()
@@ -180,7 +181,10 @@ public final class HeartbeatTransaction extends Transaction {
                                 TimeUnit.MILLISECONDS
                             ), 
                             replica.getSelf(),
-                            new HeartbeatTick(),
+                            new HeartbeatTickMsg(
+                                getId(),
+                                replica.getSelf()
+                            ),
                             replica.getContext().system().dispatcher(),
                             replica.getSelf()    
                         ); 
@@ -206,7 +210,11 @@ public final class HeartbeatTransaction extends Transaction {
                                 TimeUnit.MILLISECONDS      
                             ),
                             replica.getSelf(),
-                            new WatchdogExpired(watchdogVersion),
+                            new WatchdogExpiredMsg(
+                                getId(),
+                                replica.getSelf(),
+                                watchdogVersion
+                            ),
                             replica.getContext().system().dispatcher(),
                             replica.getSelf()
                          );
@@ -222,7 +230,13 @@ public final class HeartbeatTransaction extends Transaction {
             return;
         }
 
-        replica.broadcast(new Heartbeat(replica.id));
+        replica.broadcast(
+            new HeartbeatMsg(
+                getId(),
+                replica.getSelf(),
+                replica.id
+            )
+        );
         scheduleHeartbeatTick();
     }
 
@@ -233,7 +247,7 @@ public final class HeartbeatTransaction extends Transaction {
      * Only a heartbeat from the currently expected coordinator can reset the
      * watchdog. Heartbeats received in other states are irrelevant.
      */
-    private void handleHeartbeat(Heartbeat heartbeat) {
+    private void handleHeartbeat(HeartbeatMsg heartbeat) {
         if (state != State.WATCHING) {
             return;
         }
@@ -252,7 +266,7 @@ public final class HeartbeatTransaction extends Transaction {
      * Only the currently active watchdog can cause a transition. Older timeout messages are stale
      * and must be ignored.
      */
-    private void handleWatchdogExpired(WatchdogExpired expired) {
+    private void handleWatchdogExpired(WatchdogExpiredMsg expired) {
         if (state != State.WATCHING) {
             return;
         }
@@ -285,18 +299,18 @@ public final class HeartbeatTransaction extends Transaction {
 
     @Override
     public void computeState(Msg msg) {
-        if (msg instanceof HeartbeatTick) {
+        if (msg instanceof HeartbeatTickMsg) {
             handleHeartbeatTick();
             return;
         }
 
-        if (msg instanceof Heartbeat) {
-            handleHeartbeat((Heartbeat) msg);
+        if (msg instanceof HeartbeatMsg) {
+            handleHeartbeat((HeartbeatMsg) msg);
             return;
         }
 
-        if (msg instanceof WatchdogExpired) {
-            handleWatchdogExpired((WatchdogExpired) msg);
+        if (msg instanceof WatchdogExpiredMsg) {
+            handleWatchdogExpired((WatchdogExpiredMsg) msg);
             return;
         }
 

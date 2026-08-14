@@ -12,7 +12,8 @@ import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 import akka.testkit.javadsl.TestKit;
 import it.unitn.ds.AbstractReplica.InitSystem;
-import it.unitn.ds.HeartbeatTransaction.Heartbeat;
+import it.unitn.ds.HeartbeatTransaction.HeartbeatMsg;
+import it.unitn.ds.Transaction.TransactionId;
 import it.unitn.ds.Replica;
 
 public class TestHeartbeatTransaction {
@@ -39,6 +40,13 @@ public class TestHeartbeatTransaction {
                 "coordinator"
             );
 
+            int initialHeartbeatTransactionSequence = 0;
+            TransactionId expectedHeartbeatTransactionId = new TransactionId(
+                coordinator,
+                initialHeartbeatTransactionSequence
+            );
+
+
             Map<Integer, ActorRef> group = new HashMap<>();
             group.put(coordinatorId, coordinator);
             group.put(1, followerProbe.getRef());
@@ -48,9 +56,14 @@ public class TestHeartbeatTransaction {
                 ActorRef.noSender()
             );
 
-            Heartbeat firstHeartbeat = followerProbe.expectMsgClass(
+            HeartbeatMsg firstHeartbeat = followerProbe.expectMsgClass(
                 Duration.ofSeconds(2),
-                Heartbeat.class
+                HeartbeatMsg.class
+            );
+
+            assertEquals(
+                expectedHeartbeatTransactionId,
+                firstHeartbeat.transactionId
             );
 
             assertEquals(
@@ -58,14 +71,29 @@ public class TestHeartbeatTransaction {
                 firstHeartbeat.coordinatorId
             );
 
-            Heartbeat secondHeartbeat = followerProbe.expectMsgClass(
+            assertEquals(
+                coordinator,
+                firstHeartbeat.sender
+            );
+
+            HeartbeatMsg secondHeartbeat = followerProbe.expectMsgClass(
                 Duration.ofSeconds(2),
-                Heartbeat.class
+                HeartbeatMsg.class
+            );
+
+            assertEquals(
+                expectedHeartbeatTransactionId,
+                secondHeartbeat.transactionId
             );
 
             assertEquals(
                 coordinatorId,
                 secondHeartbeat.coordinatorId
+            );
+
+            assertEquals(
+                coordinator,
+                secondHeartbeat.sender
             );
 
         } finally {
