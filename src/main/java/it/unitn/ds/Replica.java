@@ -170,7 +170,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     /// For testing
     public void onTestMsg(TestMsg msg) {
         if(msg.content.equals("start")){
-            TestTransaction transaction = new TestTransaction(msg.transactionId, this, msg, msg.sender);
+            TestTransaction transaction = new TestTransaction(msg.transactionId, this, msg.epochPair, msg, msg.sender);
             scheduleTransaction(transaction);
         }else{
             onMessage(msg);
