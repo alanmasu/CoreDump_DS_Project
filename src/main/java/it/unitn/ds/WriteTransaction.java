@@ -99,12 +99,6 @@ public class WriteTransaction extends Transaction {
 
     @Override
     public void computeState(Msg msg) {
-        if(!msg.transactionId.equals(this.getId())) {
-            throw new IllegalArgumentException("Received message with different transactionId: msg.transactionId was " + msg.transactionId + " expected " + this.getId());
-        }
-        if(!msg.epochPair.equals(this.epochPair)) {
-            throw new IllegalArgumentException("Received message with different epochPair: msg.epochPair was " + msg.epochPair + " expected " + this.epochPair);
-        }
         if(this.owner instanceof Client) {
             clientStateMachine(msg);
         } else if(this.owner instanceof Replica) {
@@ -115,7 +109,7 @@ public class WriteTransaction extends Transaction {
 
     @Override
     public void start(){
-        owner.debug("WriteTransaction started " + this.getId());
+        owner.debug("Started WriteTransaction: " + this.getId());
         if(this.owner instanceof Client) {
             Client client = (Client) this.owner;
             client.unicast(startParameters.initialMsg, startParameters.targetActor);
