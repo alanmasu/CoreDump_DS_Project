@@ -4,6 +4,8 @@ import akka.actor.ActorRef;
 import akka.actor.Props;
 import it.unitn.ds.TestTransaction.TestMsg;
 import it.unitn.ds.Transaction.TransactionId;
+import it.unitn.ds.WriteTransaction.WriteFinishMsg;
+import it.unitn.ds.WriteTransaction.WriteMsg;
 
 import java.util.Optional;
 import java.util.LinkedList;
@@ -149,6 +151,9 @@ public class Replica extends AbstractReplica implements DistributedActor {
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
+                .match(WriteMsg.class, this::onWriteMsg)
+                .match(WriteFinishMsg.class, this::onMessage)
+                // Handle TestMsg messages, leave it as last
                 .match(TestMsg.class, this::onTestMsg)
                 .build();
     }
@@ -158,6 +163,9 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * @param msg Incoming message to be processed by the appropriate Transaction.
      */
     public void onMessage(Msg msg) {
+        if(this.replicaStatus == CrashStatus.CRASHED){
+            return;
+        }
         for(Transaction transaction : activeTransactions){
             if(transaction.getId().equals(msg.transactionId)){
                 transaction.computeState(msg);
@@ -166,6 +174,12 @@ public class Replica extends AbstractReplica implements DistributedActor {
         }
     }
     
+    public void onWriteMsg(WriteMsg msg) {
+        // TODO: when the method will be implemented, change the null with the current EpochPair of the replica
+        WriteTransaction transaction = new WriteTransaction(msg.transactionId, this, null, msg.index, msg.value, msg.sender);
+        scheduleTransaction(transaction);
+    }
+        
 
     /// For testing
     public void onTestMsg(TestMsg msg) {

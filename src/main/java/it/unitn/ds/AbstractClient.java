@@ -93,14 +93,13 @@ public abstract class AbstractClient extends AbstractActor {
         }
     }
 
-    private static class Result extends Msg {
+    private static class Result{
         public final Boolean success;
         public final int index;
         public final Integer value;
         public final int fromReplica;
 
         public Result(boolean success, int index, Integer value, int fromReplica) {
-            super(null, null, null);
             this.success = success;
             this.index = index;
             this.value = value;
@@ -135,13 +134,12 @@ public abstract class AbstractClient extends AbstractActor {
         }
     }
 
-    private static class Timeout extends Msg {
+    private static class Timeout{
         public final ActorRef client;
         public final ActorRef replica;
         public final int index;
 
         public Timeout(ActorRef client, ActorRef replica, int index) {
-            super(null, null, null);
             this.client = client;
             this.replica = replica;
             this.index = index;

@@ -89,6 +89,14 @@ public abstract class AbstractReplica extends AbstractActor {
         return maxLatency + (int)((float)maxLatency/2.0 * getSystemNumberOfActors());
     }
 
+    /**
+     * 
+     * @return The id of this replica
+     */
+    public int getId() {
+        return id;
+    }
+
     // =================================================================================
     // Network Emulation
     // =================================================================================

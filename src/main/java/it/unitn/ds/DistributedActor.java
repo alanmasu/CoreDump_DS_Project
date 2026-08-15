@@ -42,7 +42,7 @@ public interface DistributedActor {
     public TransactionId getNextTransactionId();
 
 
-    // TODO: this is not usefull for the Client Class
+    // // This is not usefull for the Client Class
     // /**
     //  * Sends a message to all actors in the system.
     //  *
