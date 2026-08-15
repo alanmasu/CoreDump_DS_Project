@@ -60,6 +60,7 @@ public class Client extends AbstractClient implements DistributedActor{
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
                 .match(TestMsg.class, this::onTestMsg)
+                .matchAny(msg -> defaultDispatcher(msg))
                 .build();
     }
 
@@ -88,6 +89,12 @@ public class Client extends AbstractClient implements DistributedActor{
 
     public void onMessage(Msg msg) {
         currentTransaction.computeState(msg);
+    }
+
+    void defaultDispatcher(Object msg){
+        if (msg instanceof Msg){
+            onMessage((Msg) msg);
+        } 
     }
 
     /// For testing

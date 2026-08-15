@@ -150,6 +150,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
                 .match(TestMsg.class, this::onTestMsg)
+                .matchAny(msg -> defaultDispatcher(msg))
                 .build();
     }
 
@@ -176,6 +177,12 @@ public class Replica extends AbstractReplica implements DistributedActor {
             onMessage(msg);
         }
     }
+
+    void defaultDispatcher(Object msg){
+        if (msg instanceof Msg){
+            onMessage((Msg) msg);
+        } 
+    }       
 
     /**
      * This callback method is invoked whenever a message is recieved by the replica and the parameter allows to differentiate the type of message.
