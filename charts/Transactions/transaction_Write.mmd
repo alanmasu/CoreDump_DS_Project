@@ -30,7 +30,7 @@ sequenceDiagram
         note over R1: R1 counts itself as an ACK
         note over R2: R2 Schedules a WriteOkTimeoutMsg<R2, 0> for itself
         note over R3: R3 Start a UpdateTransaction<R2, 0>
-        note over R3: R3 Schedules a UpdateTimeoutMsg<R2, 0> for itself
+        note over R3: R3 Schedules a WriteOkTimeoutMsg<R2, 0> for itself
         R3 ->> R1: UpdateAck(<2,4>)
         note over R1: Quorum reached
         note over R1: R1 updates <e,i> = <2,5>
