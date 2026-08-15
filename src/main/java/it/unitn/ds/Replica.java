@@ -14,6 +14,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     private Map<Integer, ActorRef> groupOfReplicas;
     private LinkedList<Transaction> activeTransactions;
     private int transactionCounter;
+    private EpochPair epochPair;
 
     int positions[];
     int coordinatorID;
@@ -35,12 +36,12 @@ public class Replica extends AbstractReplica implements DistributedActor {
 
     public Replica(int id, int minLatency, int maxLatency, int coordinatorBeatInterval, Optional<ActorRef> listener) {
         super(id, minLatency, maxLatency, coordinatorBeatInterval, listener);
-        positions = new int[AbstractReplica.POSITIONS_LIST_LENGTH];
+        this.positions = new int[AbstractReplica.POSITIONS_LIST_LENGTH];
         this.pendingCrash = null;
         this.replicaStatus = CrashStatus.NONE;
         this.crashCount = 0;
-        activeTransactions = new LinkedList<>();
-        transactionCounter = 0;
+        this.activeTransactions = new LinkedList<>();
+        this.transactionCounter = 0;
     }
 
     public static Props props(int id, int minLatency, int maxLatency, int coordinatorBeatInterval) {
@@ -144,6 +145,20 @@ public class Replica extends AbstractReplica implements DistributedActor {
     @Override
     public TransactionId getNextTransactionId() {
         return new TransactionId(this.getSelf(), transactionCounter++);
+    }
+
+    EpochPair getEpochPair() {
+        return this.epochPair;
+    }
+
+    void setEpochPair(EpochPair epochPair) throws IllegalArgumentException {
+        if (epochPair == null) {
+            throw new IllegalArgumentException("EpochPair cannot be null");
+        }
+        if (this.epochPair.compareTo(epochPair) > 0) {
+            throw new IllegalArgumentException("New epochPair must be greater than or equal to the current epochPair");
+        }
+        this.epochPair = epochPair;
     }
 
     @Override
