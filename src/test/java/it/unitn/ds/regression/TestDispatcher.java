@@ -29,6 +29,7 @@ class TestDispatcher {
     }
 
     @Test
+    @SuppressWarnings("CPD-START")
     void testReplicaDispatcher() {
         ActorSystem sys = ActorSystem.create("TestDispatcher");
         TestKit probe = new TestKit(sys);
@@ -91,6 +92,7 @@ class TestDispatcher {
     }
 
     @Test
+    @SuppressWarnings("CPD-START")
     void testClientDispatcher() {
         ActorSystem sys = ActorSystem.create("TestDispatcher");
         TestKit probe = new TestKit(sys);
