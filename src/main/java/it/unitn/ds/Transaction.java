@@ -1,19 +1,18 @@
 package it.unitn.ds;
 
-import akka.actor.Cancellable;
 import akka.actor.ActorRef;
-
+import akka.actor.Cancellable;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
 public abstract class Transaction implements Comparable<Transaction> {
 
-    protected Cancellable timeout;  
-    protected final DistributedActor owner;  
-    protected EpochPair epochPair;  
-    private final TransactionId id;  
-    protected final List<Msg> history;  
+    protected Cancellable timeout;
+    protected final DistributedActor owner;
+    protected EpochPair epochPair;
+    private final TransactionId id;
+    protected final List<Msg> history;
 
     public Transaction(TransactionId id, DistributedActor owner) {
         this.owner = owner;
@@ -56,17 +55,18 @@ public abstract class Transaction implements Comparable<Transaction> {
             result = 31 * result + Integer.hashCode(transactionId);
             return result;
         }
-    };
+    }
+    ;
 
     /**
      * Represents the parameters for starting a transaction asynchronously.
      */
-    public interface StartParameters {};
+    public interface StartParameters {}
+    ;
 
-    public TransactionId getId() {  
-        return id;  
-    }  
-
+    public TransactionId getId() {
+        return id;
+    }
 
     @Override
     public int compareTo(Transaction other) {
@@ -83,14 +83,12 @@ public abstract class Transaction implements Comparable<Transaction> {
 
     @Override
     public String toString() {
-        return "Transaction[" +
-                "id: " + id +
-                ", epochPair: " + epochPair +
-                ", owner: " + owner.getSelf().path().name() +
-                ", state: " + getState() +
-                ']';
+        return "Transaction[" + "id: "
+                + id + ", epochPair: "
+                + epochPair + ", owner: "
+                + owner.getSelf().path().name() + ", state: "
+                + getState() + ']';
     }
-
 
     /**
      * Returns the current state of the transaction.
@@ -99,18 +97,16 @@ public abstract class Transaction implements Comparable<Transaction> {
     public abstract String getState();
 
     /**
-     * Computes the new state of the transaction based on the given message. 
+     * Computes the new state of the transaction based on the given message.
      * This also calls the method to update the state of ActorRef who owns the transaction.
-     * 
+     *
      * @param msg the message to process and compute the new state.
      */
     public abstract void computeState(Msg msg);
 
-    
-
     /**
      * Starts the transaction from scratch, initializing any necessary state and sending the initial messages to the relevant actors. <p>
-     * This method is usefull to start a transaction 
+     * This method is usefull to start a transaction
      */
     public abstract void start();
 }

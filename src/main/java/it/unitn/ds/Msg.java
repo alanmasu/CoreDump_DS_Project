@@ -1,17 +1,15 @@
 package it.unitn.ds;
-import java.io.Serializable;
-import java.util.Objects;
 
 import akka.actor.ActorRef;
 import it.unitn.ds.Transaction.TransactionId;
-
+import java.io.Serializable;
+import java.util.Objects;
 
 public abstract class Msg implements Serializable {
     public final TransactionId transactionId;
     public final EpochPair epochPair;
 
     public final ActorRef sender;
-    
 
     public Msg(TransactionId transactionId, EpochPair epochPair, ActorRef sender) {
         this.transactionId = transactionId;
@@ -21,11 +19,10 @@ public abstract class Msg implements Serializable {
 
     @Override
     public String toString() {
-        return "Msg{" +
-                "tId=" + transactionId +
-                ", epochPair=" + epochPair +
-                ", sender=" + (sender == null ? "none" : sender.path()) +
-                '}';
+        return "Msg{" + "tId="
+                + transactionId + ", epochPair="
+                + epochPair + ", sender="
+                + (sender == null ? "none" : sender.path()) + '}';
     }
 
     @Override
@@ -40,9 +37,9 @@ public abstract class Msg implements Serializable {
     public boolean equals(Object obj) {
         if (obj == null || getClass() != obj.getClass()) return false;
         Msg other = (Msg) obj;
-        return this.transactionId.equals(other.transactionId) &&
-               (this.epochPair != null ? this.epochPair.equals(other.epochPair) : other.epochPair == null) &&
-               (this.sender != null ? Objects.equals(this.sender, other.sender) : other.sender == null);
+        return this.transactionId.equals(other.transactionId)
+                && (this.epochPair != null ? this.epochPair.equals(other.epochPair) : other.epochPair == null)
+                && (this.sender != null ? Objects.equals(this.sender, other.sender) : other.sender == null);
     }
-
-};
+}
+;

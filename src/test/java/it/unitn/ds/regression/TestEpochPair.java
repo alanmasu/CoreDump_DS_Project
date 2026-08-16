@@ -4,11 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.junit.jupiter.api.Test;
 import it.unitn.ds.EpochPair;
+import org.junit.jupiter.api.Test;
 
 public class TestEpochPair {
-    
+
     @Test
     void testEpochPairComparison() {
         EpochPair first = new EpochPair(1, 1);
@@ -36,5 +36,4 @@ public class TestEpochPair {
         assertNotEquals(first, differentValue);
         assertEquals(first.hashCode(), sameValue.hashCode());
     }
-    
 }

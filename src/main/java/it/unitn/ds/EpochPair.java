@@ -47,6 +47,7 @@ public class EpochPair implements Comparable<EpochPair>, Serializable {
     public int getEpoch() {
         return epoch;
     }
+
     public int getSequence() {
         return sequence;
     }

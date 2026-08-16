@@ -4,13 +4,12 @@ import akka.actor.ActorRef;
 import akka.actor.Props;
 import it.unitn.ds.TestTransaction.TestMsg;
 import it.unitn.ds.Transaction.TransactionId;
-
-import java.util.Optional;
 import java.util.LinkedList;
 import java.util.Map;
+import java.util.Optional;
 
 public class Replica extends AbstractReplica implements DistributedActor {
-    
+
     private Map<Integer, ActorRef> groupOfReplicas;
     private LinkedList<Transaction> activeTransactions;
     private int transactionCounter;
@@ -24,13 +23,19 @@ public class Replica extends AbstractReplica implements DistributedActor {
         PENDING,
         CRASHED
     };
+
     private CrashStatus replicaStatus;
     private int crashCount;
     private AbstractReplica.Crash pendingCrash;
     ////////////////////////////////////////////
 
     public Replica(int id) {
-        this(id, AbstractReplica.MIN_LATENCY, AbstractReplica.MAX_LATENCY, AbstractReplica.COORDINATOR_BEAT_INTERVAL, Optional.empty());
+        this(
+                id,
+                AbstractReplica.MIN_LATENCY,
+                AbstractReplica.MAX_LATENCY,
+                AbstractReplica.COORDINATOR_BEAT_INTERVAL,
+                Optional.empty());
     }
 
     public Replica(int id, int minLatency, int maxLatency, int coordinatorBeatInterval, Optional<ActorRef> listener) {
@@ -44,14 +49,18 @@ public class Replica extends AbstractReplica implements DistributedActor {
     }
 
     public static Props props(int id, int minLatency, int maxLatency, int coordinatorBeatInterval) {
-        return Props.create(Replica.class, () -> new Replica(id, minLatency, maxLatency, coordinatorBeatInterval, Optional.empty()));
+        return Props.create(
+                Replica.class,
+                () -> new Replica(id, minLatency, maxLatency, coordinatorBeatInterval, Optional.empty()));
     }
 
     // Props method for automated tests
-    public static Props propsWithListener(int id, int minLatency, int maxLatency, int coordinatorBeatInterval, ActorRef listener) {
-        return Props.create(Replica.class, () -> new Replica(id, minLatency, maxLatency, coordinatorBeatInterval, Optional.ofNullable(listener)));
+    public static Props propsWithListener(
+            int id, int minLatency, int maxLatency, int coordinatorBeatInterval, ActorRef listener) {
+        return Props.create(
+                Replica.class,
+                () -> new Replica(id, minLatency, maxLatency, coordinatorBeatInterval, Optional.ofNullable(listener)));
     }
-    
 
     ///////////// Sending helpers ////////////
     // public abstract class Msg implements Serializable {};
@@ -60,18 +69,18 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * Broadcasts a message to all replicas in the group.
      * @param msg The message to be broadcasted.
      * @param includeSelf A boolean flag indicating whether to include the sender replica in the broadcast. If true, the message will also be sent to the sender replica; if false, it will be excluded.
-     * 
+     *
      * @apiNote This method will be empowered in the future and will be able to send messages using total ordering
      */
-    public void broadcast(Msg msg, boolean includeSelf){
-        if(this.replicaStatus == CrashStatus.CRASHED){
+    public void broadcast(Msg msg, boolean includeSelf) {
+        if (this.replicaStatus == CrashStatus.CRASHED) {
             return;
         }
 
         ActorRef target;
         for (Map.Entry<Integer, ActorRef> entry : groupOfReplicas.entrySet()) {
             target = entry.getValue();
-            if(target != getSelf() || includeSelf){
+            if (target != getSelf() || includeSelf) {
                 this.tell(msg, target);
             }
         }
@@ -79,10 +88,10 @@ public class Replica extends AbstractReplica implements DistributedActor {
 
     /**
      * Broadcasts a message to all replicas in the group except itself.
-     * 
+     *
      * @param msg The message to be broadcasted.
      */
-    public void broadcast(Msg msg){
+    public void broadcast(Msg msg) {
         broadcast(msg, false);
     }
 
@@ -92,12 +101,12 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * @param target The replica to which the message will be sent.
      * @apiNote This method will be empowered in the future and will be able to send messages using total ordering
      */
-    public void unicast(Msg msg, ActorRef target){
-        if(this.replicaStatus == CrashStatus.CRASHED){
+    public void unicast(Msg msg, ActorRef target) {
+        if (this.replicaStatus == CrashStatus.CRASHED) {
             return;
         }
-        
-        if(target == getSelf()){
+
+        if (target == getSelf()) {
             return;
         }
         this.tell(msg, target);
@@ -106,9 +115,10 @@ public class Replica extends AbstractReplica implements DistributedActor {
 
     @Override
     public void initSystem(InitSystem sysInit) {
-        this.groupOfReplicas = sysInit.group; 
+        this.groupOfReplicas = sysInit.group;
         this.coordinatorID = sysInit.coordinator_id;
-        log("Initialized with group of replicas: " + getSystemNumberOfActors() + " replicas, coordinator ID: " + coordinatorID);
+        log("Initialized with group of replicas: " + getSystemNumberOfActors() + " replicas, coordinator ID: "
+                + coordinatorID);
     }
 
     @Override
@@ -118,7 +128,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
 
     @Override
     public void crash(AbstractReplica.Crash how_to_crash) {
-        if(how_to_crash.type == AbstractReplica.Crash.Type.Now){
+        if (how_to_crash.type == AbstractReplica.Crash.Type.Now) {
             this.replicaStatus = CrashStatus.CRASHED;
             log("Replica crashed immediately due to " + how_to_crash.type + " crash.");
             return;
@@ -148,9 +158,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
 
     @Override
     public final Receive createReceive() {
-        return createBaseReceiveBuilder()
-                .match(TestMsg.class, this::onTestMsg)
-                .build();
+        return createBaseReceiveBuilder().match(TestMsg.class, this::onTestMsg).build();
     }
 
     /**
@@ -158,29 +166,28 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * @param msg Incoming message to be processed by the appropriate Transaction.
      */
     public void onMessage(Msg msg) {
-        for(Transaction transaction : activeTransactions){
-            if(transaction.getId().equals(msg.transactionId)){
+        for (Transaction transaction : activeTransactions) {
+            if (transaction.getId().equals(msg.transactionId)) {
                 transaction.computeState(msg);
                 return;
             }
         }
     }
-    
 
     /// For testing
     public void onTestMsg(TestMsg msg) {
-        if(msg.content.equals("start")){
+        if (msg.content.equals("start")) {
             TestTransaction transaction = new TestTransaction(msg.transactionId, this, msg, msg.sender);
             scheduleTransaction(transaction);
-        }else{
+        } else {
             onMessage(msg);
         }
     }
 
     /**
      * This callback method is invoked whenever a message is recieved by the replica and the parameter allows to differentiate the type of message.
-     * The callback then checks if the replica is in a pending crash state and if the type of message matches the pending crash type. 
-     * If so, it increments the crash count and checks if it has reached the threshold for crashing. 
+     * The callback then checks if the replica is in a pending crash state and if the type of message matches the pending crash type.
+     * If so, it increments the crash count and checks if it has reached the threshold for crashing.
      * If the threshold is met, the replica's status is updated to CRASHED.
      * @param crashType Enum representing the type of message received, used to determine if the replica should crash and if to increment the crash count.
      */

@@ -7,12 +7,12 @@ public class TestTransaction extends Transaction {
     TestTransactionStartParameters startParameters;
 
     public TestTransaction(TransactionId id, DistributedActor owner) {
-        this(id, owner, null , null);
+        this(id, owner, null, null);
     }
-    
+
     public TestTransaction(TransactionId id, DistributedActor owner, TestMsg initialMsg, ActorRef targetActor) {
         super(id, owner);
-        if(initialMsg == null || targetActor == null) {
+        if (initialMsg == null || targetActor == null) {
             this.startParameters = null;
         } else {
             this.startParameters = new TestTransactionStartParameters();
@@ -51,22 +51,24 @@ public class TestTransaction extends Transaction {
     }
 
     @Override
-    public String getState(){
+    public String getState() {
         return "OK";
     }
-    
+
     @Override
     public void computeState(Msg msg) {
         if (msg instanceof TestMsg) {
             TestMsg testMsg = (TestMsg) msg;
             // if(testMsg.content.equals("start")) {
-            //     owner.unicast(new TestMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), "ack"), testMsg.sender);
+            //     owner.unicast(new TestMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), "ack"),
+            // testMsg.sender);
             //     owner.debug("Start Test Transaction " + this.id);
-            // }else 
-                if(testMsg.content.equals("ack")) {
-                owner.unicast(new TestMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), "done"), testMsg.sender);
+            // }else
+            if (testMsg.content.equals("ack")) {
+                owner.unicast(
+                        new TestMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), "done"), testMsg.sender);
                 owner.debug("Ack Test Transaction " + this.getId());
-            }else if(testMsg.content.equals("done")) {
+            } else if (testMsg.content.equals("done")) {
                 owner.debug("Done Test Transaction " + this.getId());
                 owner.onTransactionComplete(this);
             }
@@ -79,15 +81,16 @@ public class TestTransaction extends Transaction {
             throw new IllegalStateException("No start parameters provided for TestTransaction.");
         }
         owner.debug("Start Test Transaction " + this.getId());
-        TestMsg initialMsg = new TestMsg(   this.startParameters.initialMsg.transactionId, 
-                                            this.startParameters.initialMsg.epochPair, 
-                                            owner.getSelf(), 
-                                            "ack");
+        TestMsg initialMsg = new TestMsg(
+                this.startParameters.initialMsg.transactionId,
+                this.startParameters.initialMsg.epochPair,
+                owner.getSelf(),
+                "ack");
         owner.unicast(initialMsg, startParameters.targetActor);
     }
 
     public void setStartParameters(TestMsg initialMsg, ActorRef targetActor) {
-        if(initialMsg == null || targetActor == null) {
+        if (initialMsg == null || targetActor == null) {
             throw new IllegalArgumentException("Initial message and target actor cannot be null.");
         }
         this.startParameters = new TestTransactionStartParameters();
