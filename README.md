@@ -109,16 +109,17 @@ unactionable; `pmdTest` and `spotbugsTest` are restricted to `it.unitn.ds.regres
 ### Running the analysis
 
 ```bash
-./gradlew staticAnalysis      # PMD + SpotBugs, editor-clickable output — the daily one
-./gradlew cpd                 # duplicated blocks -> build/reports/cpd/cpd.xml
+./gradlew staticAnalysis      # PMD + SpotBugs + CPD, editor-clickable — the daily one
+./gradlew cpd                 # duplication only
 ./gradlew callbackContract    # the callback checklist (see below)
 ./gradlew spotlessApply       # reformat
 ./gradlew check               # tests + PMD + SpotBugs; slow
 ```
 
-`staticAnalysis` prints every finding as `<file>:<line>: <RULE>: <message>`, which most
-terminals and editors turn into a clickable link. `cpd` prints the same shape, one line per
-end of each duplication, so both ends are navigable.
+`staticAnalysis` runs all three analysers and prints every finding as
+`<file>:<line>: <RULE>: <message>`, which most terminals and editors turn into a clickable
+link. Duplications get one line per end of the block, so both are navigable. The run closes
+with a count by severity.
 
 Reports on disk:
 

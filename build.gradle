@@ -127,7 +127,7 @@ def analysisBegin = tasks.register('analysisBegin') {
     doLast { println '=== analysis: begin ===' }
 }
 
-tasks.matching { it.name in ['pmdMain', 'pmdTest', 'spotbugsMain', 'spotbugsTest'] }.configureEach {
+tasks.matching { it.name in ['pmdMain', 'pmdTest', 'spotbugsMain', 'spotbugsTest', 'cpd'] }.configureEach {
     mustRunAfter analysisBegin
 }
 
@@ -135,7 +135,7 @@ tasks.register('staticAnalysis') {
     description = 'Runs PMD and SpotBugs over main and test sources, with editor-clickable output'
     group = 'verification'
 
-    dependsOn analysisBegin, 'pmdMain', 'pmdTest', 'spotbugsMain', 'spotbugsTest'
+    dependsOn analysisBegin, 'pmdMain', 'pmdTest', 'spotbugsMain', 'spotbugsTest', 'cpd'
 
     def reports = layout.buildDirectory.dir('reports')
     def sourceRoots = (sourceSets.main.java.srcDirs + sourceSets.test.java.srcDirs).toList()
@@ -179,8 +179,14 @@ tasks.register('staticAnalysis') {
             }
         }
 
+        def cpdXml = reports.get().file('cpd/cpd.xml').asFile
+        def duplications = cpdXml.exists()
+                ? new groovy.xml.XmlSlurper().parse(cpdXml).duplication.size()
+                : 0
+
         def total = counts.values().sum()
-        println "Errors: ${counts.error}   Warnings: ${counts.warning}   Info: ${counts.info}   (${total} total)"
+        println "Errors: ${counts.error}   Warnings: ${counts.warning}   Info: ${counts.info}   " +
+                "Duplications: ${duplications}   (${total} findings)"
         println '=== analysis: end ==='
     }
 }
@@ -225,7 +231,7 @@ tasks.register('cpd', JavaExec) {
                 println "${f.@path}:${f.@line}:\tCPD:\t${d.@lines} duplicated lines, also at ${others.join(', ')}"
             }
         }
-        println "Duplications: ${duplications.size()}   (report: ${xml.absolutePath})"
+        println "CPD report: ${xml.absolutePath}"
     }
 }
 
