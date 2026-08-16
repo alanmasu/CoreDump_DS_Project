@@ -179,14 +179,16 @@ tasks.register('staticAnalysis') {
             }
         }
 
+        // Counted per location, not per block: CPD reports one line for each end of a
+        // duplication, so this is what actually lands in the Problems panel.
         def cpdXml = reports.get().file('cpd/cpd.xml').asFile
         def duplications = cpdXml.exists()
-                ? new groovy.xml.XmlSlurper().parse(cpdXml).duplication.size()
+                ? new groovy.xml.XmlSlurper().parse(cpdXml).duplication.collect { it.file.size() }.sum() ?: 0
                 : 0
 
-        def total = counts.values().sum()
+        def total = counts.values().sum() + duplications
         println "Errors: ${counts.error}   Warnings: ${counts.warning}   Info: ${counts.info}   " +
-                "Duplications: ${duplications}   (${total} findings)"
+                "Duplications: ${duplications}   (${total} problems)"
         println '=== analysis: end ==='
     }
 }
