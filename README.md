@@ -64,6 +64,181 @@ public void testClientReadRequest() {
 }
 ```
 
+## Test Coverage
+
+```bash
+./gradlew jacocoTestReport      # then open build/reports/jacoco/test/html/index.html
+```
+
+JaCoCo instruments the bytecode and records which lines and branches the tests actually
+execute. It finds no bugs: it tells you **where you have not looked**. On a protocol with
+crashes and message reordering the uncovered lines are the error paths, which is exactly
+where bugs survive — so the report is a way to choose which test to write next instead of
+guessing.
+
+The report is driven by `regression`, not `test`: the base suite is slow and currently
+failing. Any other `Test` task that has already run contributes its data too.
+
+`AbstractClient`, `AbstractReplica`, `Logger`, `NetworkChannel` and `Main` are excluded:
+they come from the course template, and measuring our coverage of somebody else's
+infrastructure only dilutes the number.
+
+JaCoCo is pinned to 0.8.15 — earlier versions cannot instrument Java 25 class files and
+abort with `IllegalClassFormatException`.
+
+## Static Code Analysis
+
+The build integrates five tools, each answering a question the others cannot:
+
+| Tool | What it looks at |
+|---|---|
+| **PMD** | Source AST: code smells, naming, missing Javadoc |
+| **SpotBugs** | Bytecode dataflow: probable bugs, thread visibility, overflow |
+| **CPD** | Duplicated blocks (token-based, survives renames) |
+| **ArchUnit** | Architectural rules, expressed as tests |
+| **Spotless** | Formatting — rewrites rather than reports |
+
+PMD and SpotBugs run with `ignoreFailures = true`: they report findings but never turn the
+build red. Tighten that once the counts are low enough to be sustainable.
+
+**Only our own code is analyzed.** `it.unitn.ds.base` and `TestsCommons` come from the
+course template and we do not get to change them, so findings there would be
+unactionable; `pmdTest` and `spotbugsTest` are restricted to `it.unitn.ds.regression` and
+`it.unitn.ds.contract` in `build.gradle`.
+
+### Running the analysis
+
+```bash
+./gradlew staticAnalysis      # PMD + SpotBugs, editor-clickable output — the daily one
+./gradlew cpd                 # duplicated blocks -> build/reports/cpd/cpd.xml
+./gradlew callbackContract    # the callback checklist (see below)
+./gradlew spotlessApply       # reformat
+./gradlew check               # tests + PMD + SpotBugs; slow
+```
+
+`staticAnalysis` prints every finding as `<file>:<line>: <RULE>: <message>`, which most
+terminals and editors turn into a clickable link. `cpd` prints the same shape, one line per
+end of each duplication, so both ends are navigable.
+
+Reports on disk:
+
+| Path | Content |
+|---|---|
+| `build/reports/pmd/` | HTML + XML |
+| `build/reports/spotbugs/` | HTML + SARIF |
+| `build/reports/cpd/cpd.xml` | Duplications |
+| `build/reports/jacoco/test/html/` | Coverage |
+
+PMD and SpotBugs always re-run rather than going `UP-TO-DATE`. An up-to-date task prints
+nothing, which an editor reads as "no findings" and uses to clear the Problems panel — a
+silently emptied panel is worse than a few seconds of re-analysis.
+
+### The callback contract
+
+`src/test/java/it/unitn/ds/contract/TestCallbackContract.java` checks, via ArchUnit, that
+every `callbackOn*` method of `AbstractClient` and `AbstractReplica` is actually invoked
+somewhere. The graders' tests observe our system *only* through those callbacks: forgetting
+one makes a correct implementation look broken, and nothing else in the build notices.
+
+The check is **static** — it reads the compiled bytecode looking for the call, so it catches
+"you never call it", not "you call it at the wrong moment". It asks whether anything in
+`it.unitn.ds` makes the call rather than pinning it on `Client` or `Replica`, because a
+callback is likely to be fired from a `Transaction` subclass, and ArchUnit sees only the
+calls in a class's own bytecode.
+
+These tests are tagged `contract` and **excluded from both `test` and `regression`**: they
+stay red until the last callback is implemented, and a permanently red CI is a CI nobody
+reads. Run `./gradlew callbackContract` deliberately, towards the end of development.
+
+### Formatting
+
+```bash
+./gradlew spotlessApply     # rewrites the files — run it before committing
+./gradlew spotlessCheck     # verifies only
+```
+
+It reformats, drops unused imports, trims trailing whitespace and adds the final newline.
+
+### VS Code integration
+
+`.vscode/tasks.json` defines four tasks. Each one attaches a **problem matcher**, which is
+what makes findings appear as **squiggles on the offending line**, with the message on
+hover, an entry in the Problems panel, and `F8` / `Shift+F8` to jump between them. You
+never have to read the terminal.
+
+| Task | What it does |
+|---|---|
+| **Static analysis (PMD + SpotBugs)** | One-shot analysis; findings become warnings |
+| **Static analysis (watch)** | Same, re-run automatically on every save |
+| **Run tests** | `./gradlew test`; failures become errors on the failing assertion |
+| **Run regression tests** | Same for the regression suite |
+
+| **Duplicated code (CPD)** | Duplications become hints on both ends of each block |
+
+`callbackContract` has no VS Code task: its output is a checklist to read, not a set of
+locations to jump between.
+
+Run them with `Ctrl+Shift+P` → *Tasks: Run Task*. **Run tests** is the default test task,
+so `Ctrl+Shift+P` → *Tasks: Run Test Task* goes straight to it.
+
+Important: this only works when launched **as a VS Code task**. Running `./gradlew` in a
+terminal produces the same text, but VS Code only feeds a problem matcher from a task it
+started itself — from a plain terminal you just get `Ctrl+Click`-able paths.
+
+**Watch mode** is the one worth keeping running: it uses Gradle's `--continuous` flag, so
+saving any source file re-runs the analysis and refreshes the squiggles. VS Code needs to
+know where one pass ends and the next begins, in order to clear the previous diagnostics
+before publishing the new ones; it takes that from Gradle's own output (`> Task
+:compileJava` opens a pass, `BUILD SUCCESSFUL` / `Waiting for changes` closes it).
+
+**Test failures.** Gradle normally reports a failure as a stack trace, whose top frames
+belong to JUnit, Akka and Scala. An `afterTest` hook on every `Test` task takes the first
+stack frame under `it.unitn.ds` — the assertion you actually wrote — and prints it in the
+format the matcher understands, so a failing test underlines the failing line. The hook
+covers `regression` too, since it is registered on all `Test` tasks.
+
+**Other ways to launch.** Since you have `vscjava.vscode-gradle`, the Gradle sidebar shows
+`staticAnalysis` under *verification* with a play button — one click, but that extension
+runs it in its own terminal, so no squiggles. To bind the task to a key instead, add this
+to your user `keybindings.json` (VS Code has no per-workspace keybindings):
+
+```json
+{
+    "key": "ctrl+alt+a",
+    "command": "workbench.action.tasks.runTask",
+    "args": "Static analysis (PMD + SpotBugs)"
+}
+```
+
+> **Note:** `.vscode/` is listed in `.gitignore`, but `tasks.json` has been force-added and
+> *is* tracked, so a fresh clone gets the tasks. Anything else you drop in `.vscode/`
+> (`settings.json`, for instance) stays local unless you add it explicitly with
+> `git add -f`.
+
+### Configuration
+
+| File | Purpose |
+|---|---|
+| `config/pmd/ruleset.xml` | Which PMD rules are active |
+| `config/spotbugs/exclude.xml` | Which SpotBugs detectors are silenced |
+
+Tool versions are pinned in `build.gradle` (`pmd.toolVersion`, `spotbugs.toolVersion`,
+`jacoco.toolVersion`).
+
+SpotBugs runs at `reportLevel = LOW`. That setting is about **confidence**, not severity:
+it controls how sure a detector must be before reporting. `LOW` reports everything the
+detectors suspect, which here costs seven findings over the `MEDIUM` default — one of them
+a real bug. Seeing them and deciding beats filtering them out upstream.
+
+**Exclusions are a starting point, not a verdict.** A rule exists for a reason, and
+silencing one means accepting the risk it was guarding against. Every exclusion carries an
+inline comment explaining why; if you want to see what is behind one, delete it and re-run.
+
+`scratch/StaticAnalysis_Exclusions.md` documents each one: what the rule detects, why the
+pattern is generally a problem, what it actually flags here, and whether the exclusion
+holds up. Most of the original exclusions were removed by fixing the code instead — that
+document records which, and why the remaining ones stay.
+
 ## Repository Structure
 
 In the `main/java/it/unitn/ds` directory you will find the project base classes.  
