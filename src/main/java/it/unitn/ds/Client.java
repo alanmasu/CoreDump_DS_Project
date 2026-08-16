@@ -2,6 +2,8 @@ package it.unitn.ds;
 
 import akka.actor.ActorRef;
 import akka.actor.Props;
+import it.unitn.ds.ReadTransaction.ReadResultMsg;
+import it.unitn.ds.ReadTransaction.ReadTimeoutMsg;
 import it.unitn.ds.TestTransaction.TestMsg;
 import it.unitn.ds.Transaction.TransactionId;
 
@@ -43,7 +45,8 @@ public class Client extends AbstractClient implements DistributedActor{
 
     @Override
     public void sendRead(ActorRef replica, int index) {
-        // TODO: implement        
+        ReadTransaction transaction = new ReadTransaction(getNextTransactionId(), this, index, replica);
+        scheduleTransaction(transaction);
     }
 
     @Override
@@ -59,6 +62,8 @@ public class Client extends AbstractClient implements DistributedActor{
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
+                .match(ReadResultMsg.class, this::onMessage)
+                .match(ReadTimeoutMsg.class, this::onMessage)
                 .match(TestMsg.class, this::onTestMsg)
                 .build();
     }

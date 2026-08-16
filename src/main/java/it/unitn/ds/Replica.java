@@ -2,6 +2,8 @@ package it.unitn.ds;
 
 import akka.actor.ActorRef;
 import akka.actor.Props;
+import it.unitn.ds.ReadTransaction.ReadMsg;
+import it.unitn.ds.ReadTransaction.ReadResultMsg;
 import it.unitn.ds.TestTransaction.TestMsg;
 import it.unitn.ds.Transaction.TransactionId;
 
@@ -149,6 +151,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
+                .match(ReadMsg.class, this::onReadMsg)
                 .match(TestMsg.class, this::onTestMsg)
                 .build();
     }
@@ -166,6 +169,9 @@ public class Replica extends AbstractReplica implements DistributedActor {
         }
     }
     
+    public void onReadMsg(ReadMsg msg) {
+        unicast(new ReadResultMsg(msg.transactionId, msg.epochPair, getSelf(), positions[msg.index], this.id), msg.sender);   
+    }
 
     /// For testing
     public void onTestMsg(TestMsg msg) {
