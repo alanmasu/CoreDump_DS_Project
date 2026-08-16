@@ -26,9 +26,9 @@
         <exclude name="UnitTestShouldIncludeAssert"/>
     </rule>
 
-    <!-- Re-enabled for production code. Exempt: Logger (it is the sanctioned System.out
-         wrapper), Main (banners, never under test), and our own tests (console output is
-         the point). Template tests are excluded in build.gradle, not here. -->
+    <!-- Logger (it is the sanctioned System.out wrapper), Main (banners, never under test), 
+         and our own tests (console output is the point). Template tests are excluded in 
+         build.gradle, not here. -->
     <rule ref="category/java/bestpractices.xml/SystemPrintln">
         <properties>
             <property name="violationSuppressXPath"
