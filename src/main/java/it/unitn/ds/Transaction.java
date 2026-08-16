@@ -17,8 +17,8 @@ public abstract class Transaction implements Comparable<Transaction> {
     public Transaction(TransactionId id, DistributedActor owner) {
         this.owner = owner;
         this.id = id;
-        this.timeout = null;
-        this.epochPair = null;
+        // timeout and epochPair are left at their default null: no timer is scheduled and
+        // no epoch is known until the transaction actually starts.
         this.history = new ArrayList<>();
     }
 
@@ -27,42 +27,42 @@ public abstract class Transaction implements Comparable<Transaction> {
      */
     public static class TransactionId implements Serializable {
         final ActorRef initiator;
-        final int transactionId;
+        final int sequenceNumber;
 
-        public TransactionId(ActorRef initiator, int transactionId) {
+        public TransactionId(ActorRef initiator, int sequenceNumber) {
             this.initiator = initiator;
-            this.transactionId = transactionId;
+            this.sequenceNumber = sequenceNumber;
         }
 
         @Override
         public String toString() {
-            return "<" + initiator.path().name() + ", " + transactionId + ">";
+            return "<" + initiator.path().name() + ", " + sequenceNumber + ">";
         }
 
         @Override
         public boolean equals(Object obj) {
-            if (this == obj) return true;
+            if (this == obj) {
+                return true;
+            }
             if (obj == null || getClass() != obj.getClass()) {
                 return false;
             }
             TransactionId other = (TransactionId) obj;
-            return this.initiator.equals(other.initiator) && this.transactionId == other.transactionId;
+            return this.initiator.equals(other.initiator) && this.sequenceNumber == other.sequenceNumber;
         }
 
         @Override
         public int hashCode() {
             int result = initiator.hashCode();
-            result = 31 * result + Integer.hashCode(transactionId);
+            result = 31 * result + Integer.hashCode(sequenceNumber);
             return result;
         }
     }
-    ;
 
     /**
      * Represents the parameters for starting a transaction asynchronously.
      */
     public interface StartParameters {}
-    ;
 
     public TransactionId getId() {
         return id;
@@ -79,6 +79,23 @@ public abstract class Transaction implements Comparable<Transaction> {
         } else {
             return this.epochPair.compareTo(other.epochPair);
         }
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+        Transaction other = (Transaction) obj;
+        return this.id.equals(other.id);
+    }
+
+    @Override
+    public int hashCode() {
+        return id.hashCode();
     }
 
     @Override

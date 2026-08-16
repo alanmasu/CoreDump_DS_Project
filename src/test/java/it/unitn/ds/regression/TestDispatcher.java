@@ -8,6 +8,7 @@ import akka.testkit.javadsl.TestKit;
 import com.typesafe.config.ConfigFactory;
 import it.unitn.ds.EpochPair;
 import it.unitn.ds.Logger;
+import it.unitn.ds.ProbeTransaction;
 import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.Replica;
 import it.unitn.ds.Transaction.TransactionId;
@@ -16,6 +17,9 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 class TestDispatcher {
+
+    private static final String MSG_EXPECT_ACK = "The received message should be an ack";
+    private static final String MSG_EXPECT_MATCH = "The received message should match the sent message.";
 
     @BeforeAll
     static void setup() {
@@ -35,17 +39,17 @@ class TestDispatcher {
         TransactionId tId1 = new TransactionId(replica, 1);
         TransactionId tId2 = new TransactionId(replica, 2);
 
-        ProbeMsg startMsg1 = new ProbeMsg(tId1, epochPair, probe.getRef(), "start");
-        ProbeMsg startMsg2 = new ProbeMsg(tId2, epochPair, probe.getRef(), "start");
-        ProbeMsg ackMsg1 = new ProbeMsg(tId1, epochPair, probe.getRef(), "ack");
-        ProbeMsg ackMsg2 = new ProbeMsg(tId2, epochPair, probe.getRef(), "ack");
+        ProbeMsg startMsg1 = new ProbeMsg(tId1, epochPair, probe.getRef(), ProbeTransaction.MSG_START);
+        ProbeMsg startMsg2 = new ProbeMsg(tId2, epochPair, probe.getRef(), ProbeTransaction.MSG_START);
+        ProbeMsg ackMsg1 = new ProbeMsg(tId1, epochPair, probe.getRef(), ProbeTransaction.MSG_ACK);
+        ProbeMsg ackMsg2 = new ProbeMsg(tId2, epochPair, probe.getRef(), ProbeTransaction.MSG_ACK);
         replica.tell(startMsg1, probe.getRef());
         replica.tell(startMsg2, probe.getRef());
 
         // Expecting the replica to send back an ack for each start message
         // 1st ack
         receivedMsg = probe.expectMsgClass(ProbeMsg.class);
-        assertEquals("ack", receivedMsg.content, "The received message should be an ack");
+        assertEquals(ProbeTransaction.MSG_ACK, receivedMsg.content, MSG_EXPECT_ACK);
         if (receivedMsg.transactionId.equals(tId1)) {
             replica.tell(ackMsg1, probe.getRef());
         } else {
@@ -54,7 +58,7 @@ class TestDispatcher {
 
         // 2nd ack
         receivedMsg = probe.expectMsgClass(ProbeMsg.class);
-        assertEquals("ack", receivedMsg.content, "The received message should be an ack");
+        assertEquals(ProbeTransaction.MSG_ACK, receivedMsg.content, MSG_EXPECT_ACK);
         if (receivedMsg.transactionId.equals(tId1)) {
             replica.tell(ackMsg1, probe.getRef());
         } else {
@@ -62,12 +66,12 @@ class TestDispatcher {
         }
 
         // Expecting the replica to send back a done message for each transaction
-        ProbeMsg doneMsg1 = new ProbeMsg(tId1, epochPair, probe.getRef(), "done");
-        ProbeMsg doneMsg2 = new ProbeMsg(tId2, epochPair, probe.getRef(), "done");
+        ProbeMsg doneMsg1 = new ProbeMsg(tId1, epochPair, probe.getRef(), ProbeTransaction.MSG_DONE);
+        ProbeMsg doneMsg2 = new ProbeMsg(tId2, epochPair, probe.getRef(), ProbeTransaction.MSG_DONE);
 
         // 1st done
         receivedMsg = probe.expectMsgClass(ProbeMsg.class);
-        assertEquals("done", receivedMsg.content, "The received message should match the sent message.");
+        assertEquals(ProbeTransaction.MSG_DONE, receivedMsg.content, MSG_EXPECT_MATCH);
         if (receivedMsg.transactionId.equals(tId1)) {
             replica.tell(doneMsg1, probe.getRef());
         } else {
@@ -76,7 +80,7 @@ class TestDispatcher {
 
         // 2nd done
         receivedMsg = probe.expectMsgClass(ProbeMsg.class);
-        assertEquals("done", receivedMsg.content, "The received message should match the sent message.");
+        assertEquals(ProbeTransaction.MSG_DONE, receivedMsg.content, MSG_EXPECT_MATCH);
         if (receivedMsg.transactionId.equals(tId1)) {
             replica.tell(doneMsg1, probe.getRef());
         } else {
@@ -97,29 +101,29 @@ class TestDispatcher {
         TransactionId tId1 = new TransactionId(client, 1);
         TransactionId tId2 = new TransactionId(client, 2);
 
-        ProbeMsg startMsg1 = new ProbeMsg(tId1, epochPair, probe.getRef(), "start");
-        ProbeMsg startMsg2 = new ProbeMsg(tId2, epochPair, probe.getRef(), "start");
-        ProbeMsg ackMsg1 = new ProbeMsg(tId1, epochPair, probe.getRef(), "ack");
-        ProbeMsg ackMsg2 = new ProbeMsg(tId2, epochPair, probe.getRef(), "ack");
+        ProbeMsg startMsg1 = new ProbeMsg(tId1, epochPair, probe.getRef(), ProbeTransaction.MSG_START);
+        ProbeMsg startMsg2 = new ProbeMsg(tId2, epochPair, probe.getRef(), ProbeTransaction.MSG_START);
+        ProbeMsg ackMsg1 = new ProbeMsg(tId1, epochPair, probe.getRef(), ProbeTransaction.MSG_ACK);
+        ProbeMsg ackMsg2 = new ProbeMsg(tId2, epochPair, probe.getRef(), ProbeTransaction.MSG_ACK);
         client.tell(startMsg1, probe.getRef());
         client.tell(startMsg2, probe.getRef());
 
         receivedMsg = probe.expectMsgClass(ProbeMsg.class);
-        assertEquals(ackMsg1.content, receivedMsg.content, "The received message should be an ack");
+        assertEquals(ackMsg1.content, receivedMsg.content, MSG_EXPECT_ACK);
         client.tell(ackMsg1, probe.getRef());
 
-        ProbeMsg doneMsg1 = new ProbeMsg(tId1, epochPair, probe.getRef(), "done");
+        ProbeMsg doneMsg1 = new ProbeMsg(tId1, epochPair, probe.getRef(), ProbeTransaction.MSG_DONE);
         receivedMsg = probe.expectMsgClass(ProbeMsg.class);
-        assertEquals(doneMsg1.content, receivedMsg.content, "The received message should match the sent message.");
+        assertEquals(doneMsg1.content, receivedMsg.content, MSG_EXPECT_MATCH);
         client.tell(doneMsg1, probe.getRef());
 
         receivedMsg = probe.expectMsgClass(ProbeMsg.class);
-        assertEquals(ackMsg2.content, receivedMsg.content, "The received message should be an ack");
+        assertEquals(ackMsg2.content, receivedMsg.content, MSG_EXPECT_ACK);
         client.tell(ackMsg2, probe.getRef());
 
-        ProbeMsg doneMsg2 = new ProbeMsg(tId2, epochPair, probe.getRef(), "done");
+        ProbeMsg doneMsg2 = new ProbeMsg(tId2, epochPair, probe.getRef(), ProbeTransaction.MSG_DONE);
         receivedMsg = probe.expectMsgClass(ProbeMsg.class);
-        assertEquals(doneMsg2.content, receivedMsg.content, "The received message should match the sent message.");
+        assertEquals(doneMsg2.content, receivedMsg.content, MSG_EXPECT_MATCH);
         client.tell(doneMsg2, probe.getRef());
 
         sys.terminate();
@@ -154,15 +158,15 @@ class TestDispatcher {
         TransactionId tId1 = new TransactionId(client, 1);
 
         // No transaction has been started: this reply belongs to nobody.
-        client.tell(new ProbeMsg(tId1, epochPair, probe.getRef(), "ack"), probe.getRef());
+        client.tell(new ProbeMsg(tId1, epochPair, probe.getRef(), ProbeTransaction.MSG_ACK), probe.getRef());
         // Neither a reply nor a Terminated: the message was dropped, the actor survived.
         probe.expectNoMessage(Duration.ofMillis(500));
 
         // The client must still be able to run a transaction afterwards.
-        client.tell(new ProbeMsg(tId1, epochPair, probe.getRef(), "start"), probe.getRef());
+        client.tell(new ProbeMsg(tId1, epochPair, probe.getRef(), ProbeTransaction.MSG_START), probe.getRef());
         ProbeMsg receivedMsg = probe.expectMsgClass(ProbeMsg.class);
         assertEquals(
-                "ack",
+                ProbeTransaction.MSG_ACK,
                 receivedMsg.content,
                 "The client should start the transaction normally after the dropped message");
 
@@ -173,7 +177,7 @@ class TestDispatcher {
      * A message must reach a transaction only if it belongs to it.
      * <p>
      * Without the id check, a reply that outlives its own transaction is handed to whichever
-     * transaction happens to be current: the client would answer "done" for a transaction
+     * transaction happens to be current: the client would answer ProbeTransaction.MSG_DONE for a transaction
      * that never ran, and the running one would advance on somebody else's data. With
      * emulated network latency this reordering is routine rather than exceptional.
      */
@@ -189,19 +193,19 @@ class TestDispatcher {
         TransactionId tId2 = new TransactionId(client, 2);
 
         // Transaction 1 is the only one in flight.
-        client.tell(new ProbeMsg(tId1, epochPair, probe.getRef(), "start"), probe.getRef());
+        client.tell(new ProbeMsg(tId1, epochPair, probe.getRef(), ProbeTransaction.MSG_START), probe.getRef());
         ProbeMsg receivedMsg = probe.expectMsgClass(ProbeMsg.class);
-        assertEquals("ack", receivedMsg.content, "The client should start transaction 1");
+        assertEquals(ProbeTransaction.MSG_ACK, receivedMsg.content, "The client should start transaction 1");
         assertEquals(tId1, receivedMsg.transactionId, "The start should belong to transaction 1");
 
         // A reply carrying transaction 2's id must not be routed to transaction 1.
-        client.tell(new ProbeMsg(tId2, epochPair, probe.getRef(), "ack"), probe.getRef());
+        client.tell(new ProbeMsg(tId2, epochPair, probe.getRef(), ProbeTransaction.MSG_ACK), probe.getRef());
         probe.expectNoMessage(Duration.ofMillis(500));
 
         // Transaction 1 must be untouched and still able to progress.
-        client.tell(new ProbeMsg(tId1, epochPair, probe.getRef(), "ack"), probe.getRef());
+        client.tell(new ProbeMsg(tId1, epochPair, probe.getRef(), ProbeTransaction.MSG_ACK), probe.getRef());
         receivedMsg = probe.expectMsgClass(ProbeMsg.class);
-        assertEquals("done", receivedMsg.content, "Transaction 1 should still progress normally");
+        assertEquals(ProbeTransaction.MSG_DONE, receivedMsg.content, "Transaction 1 should still progress normally");
         assertEquals(tId1, receivedMsg.transactionId, "The reply should belong to transaction 1");
 
         sys.terminate();

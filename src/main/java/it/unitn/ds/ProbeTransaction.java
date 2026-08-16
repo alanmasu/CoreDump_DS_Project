@@ -4,6 +4,12 @@ import akka.actor.ActorRef;
 
 public class ProbeTransaction extends Transaction {
 
+    /** Probe protocol vocabulary: start -> ack -> done. */
+    public static final String MSG_START = "start";
+
+    public static final String MSG_ACK = "ack";
+    public static final String MSG_DONE = "done";
+
     ProbeTransactionStartParameters startParameters;
 
     public ProbeTransaction(TransactionId id, DistributedActor owner) {
@@ -12,9 +18,8 @@ public class ProbeTransaction extends Transaction {
 
     public ProbeTransaction(TransactionId id, DistributedActor owner, ProbeMsg initialMsg, ActorRef targetActor) {
         super(id, owner);
-        if (initialMsg == null || targetActor == null) {
-            this.startParameters = null;
-        } else {
+        // Left at its default null when either argument is missing; start() reports that.
+        if (initialMsg != null && targetActor != null) {
             this.startParameters = new ProbeTransactionStartParameters();
             this.startParameters.initialMsg = initialMsg;
             this.startParameters.targetActor = targetActor;
@@ -40,6 +45,13 @@ public class ProbeTransaction extends Transaction {
             }
             return false;
         }
+
+        @Override
+        public int hashCode() {
+            int result = super.hashCode();
+            result = 31 * result + content.hashCode();
+            return result;
+        }
     }
 
     /**
@@ -59,23 +71,24 @@ public class ProbeTransaction extends Transaction {
     public void computeState(Msg msg) {
         if (msg instanceof ProbeMsg) {
             ProbeMsg testMsg = (ProbeMsg) msg;
-            // if(testMsg.content.equals("start")) {
-            //     owner.unicast(new ProbeMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), "ack"),
+            // if(testMsg.content.equals(MSG_START)) {
+            //     owner.unicast(new ProbeMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), MSG_ACK),
             // testMsg.sender);
             //     owner.debug("Start Test Transaction " + this.id);
             // }else
-            if (testMsg.content.equals("ack")) {
+            if (MSG_ACK.equals(testMsg.content)) {
                 owner.unicast(
-                        new ProbeMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), "done"),
+                        new ProbeMsg(testMsg.transactionId, testMsg.epochPair, owner.getSelf(), MSG_DONE),
                         testMsg.sender);
                 owner.debug("Ack Test Transaction " + this.getId());
-            } else if (testMsg.content.equals("done")) {
+            } else if (MSG_DONE.equals(testMsg.content)) {
                 owner.debug("Done Test Transaction " + this.getId());
                 owner.onTransactionComplete(this);
             }
         }
     }
 
+    @Override
     public void start() {
         if (startParameters == null) {
             owner.debug("No start parameters provided for ProbeTransaction. Transaction will not be started.");
@@ -86,7 +99,7 @@ public class ProbeTransaction extends Transaction {
                 this.startParameters.initialMsg.transactionId,
                 this.startParameters.initialMsg.epochPair,
                 owner.getSelf(),
-                "ack");
+                MSG_ACK);
         owner.unicast(initialMsg, startParameters.targetActor);
     }
 

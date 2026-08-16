@@ -62,7 +62,9 @@ public class Client extends AbstractClient implements DistributedActor {
 
     @Override
     public TransactionId getNextTransactionId() {
-        return new TransactionId(this.getSelf(), transactionCounter++);
+        TransactionId id = new TransactionId(this.getSelf(), transactionCounter);
+        ++transactionCounter;
+        return id;
     }
 
     @Override
@@ -86,12 +88,9 @@ public class Client extends AbstractClient implements DistributedActor {
     @Override
     public void onTransactionComplete(Transaction transaction) {
         debug("Transaction completed: " + transaction.getId());
-        Transaction nextTransaction = scheduledTransactions.poll();
-        if (nextTransaction != null) {
-            this.currentTransaction = nextTransaction;
-            nextTransaction.start();
-        } else {
-            this.currentTransaction = null;
+        this.currentTransaction = scheduledTransactions.poll();
+        if (this.currentTransaction != null) {
+            this.currentTransaction.start();
         }
     }
 
@@ -109,7 +108,7 @@ public class Client extends AbstractClient implements DistributedActor {
 
     /// For testing
     public void onProbeMsg(ProbeMsg msg) {
-        if (msg.content.equals("start")) {
+        if (ProbeTransaction.MSG_START.equals(msg.content)) {
             ProbeTransaction transaction = new ProbeTransaction(msg.transactionId, this, msg, msg.sender);
             scheduleTransaction(transaction);
         } else {

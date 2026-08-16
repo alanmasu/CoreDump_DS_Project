@@ -5,16 +5,17 @@ import akka.actor.Props;
 import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.Transaction.TransactionId;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 public class Replica extends AbstractReplica implements DistributedActor {
 
     private Map<Integer, ActorRef> groupOfReplicas;
-    private LinkedList<Transaction> activeTransactions;
+    private List<Transaction> activeTransactions;
     private int transactionCounter;
 
-    int positions[];
+    private int positions[];
     int coordinatorID;
 
     ///////////// For chashing ////////////
@@ -41,7 +42,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     public Replica(int id, int minLatency, int maxLatency, int coordinatorBeatInterval, Optional<ActorRef> listener) {
         super(id, minLatency, maxLatency, coordinatorBeatInterval, listener);
         positions = new int[AbstractReplica.POSITIONS_LIST_LENGTH];
-        this.pendingCrash = null;
+        // pendingCrash is left at its default null: no crash has been requested yet.
         this.replicaStatus = CrashStatus.NONE;
         this.crashCount = 0;
         activeTransactions = new LinkedList<>();
@@ -62,6 +63,22 @@ public class Replica extends AbstractReplica implements DistributedActor {
                 () -> new Replica(id, minLatency, maxLatency, coordinatorBeatInterval, Optional.ofNullable(listener)));
     }
 
+    public int getPosition(int index) {
+        if (index < 0 || index >= AbstractReplica.POSITIONS_LIST_LENGTH) {
+            throw new IllegalArgumentException(
+                    "Index must be between 0 and " + (AbstractReplica.POSITIONS_LIST_LENGTH - 1));
+        }
+        return positions[index];
+    }
+
+    public void setPosition(int index, int value) {
+        if (index < 0 || index >= AbstractReplica.POSITIONS_LIST_LENGTH) {
+            throw new IllegalArgumentException(
+                    "Index must be between 0 and " + (AbstractReplica.POSITIONS_LIST_LENGTH - 1));
+        }
+        positions[index] = value;
+    }
+
     ///////////// Sending helpers ////////////
     // public abstract class Msg implements Serializable {};
 
@@ -80,7 +97,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
         ActorRef target;
         for (Map.Entry<Integer, ActorRef> entry : groupOfReplicas.entrySet()) {
             target = entry.getValue();
-            if (target != getSelf() || includeSelf) {
+            if (!target.equals(getSelf()) || includeSelf) {
                 this.tell(msg, target);
             }
         }
@@ -101,12 +118,13 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * @param target The replica to which the message will be sent.
      * @apiNote This method will be empowered in the future and will be able to send messages using total ordering
      */
+    @Override
     public void unicast(Msg msg, ActorRef target) {
         if (this.replicaStatus == CrashStatus.CRASHED) {
             return;
         }
 
-        if (target == getSelf()) {
+        if (target.equals(getSelf())) {
             return;
         }
         this.tell(msg, target);
@@ -153,7 +171,9 @@ public class Replica extends AbstractReplica implements DistributedActor {
 
     @Override
     public TransactionId getNextTransactionId() {
-        return new TransactionId(this.getSelf(), transactionCounter++);
+        TransactionId id = new TransactionId(this.getSelf(), transactionCounter);
+        ++transactionCounter;
+        return id;
     }
 
     @Override
@@ -178,7 +198,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
 
     /// For testing
     public void onProbeMsg(ProbeMsg msg) {
-        if (msg.content.equals("start")) {
+        if (ProbeTransaction.MSG_START.equals(msg.content)) {
             ProbeTransaction transaction = new ProbeTransaction(msg.transactionId, this, msg, msg.sender);
             scheduleTransaction(transaction);
         } else {

@@ -19,7 +19,7 @@ public abstract class Msg implements Serializable {
 
     @Override
     public String toString() {
-        return "Msg{" + "tId="
+        return "Msg{tId="
                 + transactionId + ", epochPair="
                 + epochPair + ", sender="
                 + (sender == null ? "none" : sender.path()) + '}';
@@ -35,7 +35,10 @@ public abstract class Msg implements Serializable {
 
     @Override
     public boolean equals(Object obj) {
-        if (obj == null || getClass() != obj.getClass()) return false;
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+
         Msg other = (Msg) obj;
         return this.transactionId.equals(other.transactionId)
                 && (this.epochPair != null ? this.epochPair.equals(other.epochPair) : other.epochPair == null)
