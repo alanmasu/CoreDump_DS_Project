@@ -95,8 +95,16 @@ public class Client extends AbstractClient implements DistributedActor {
         }
     }
 
+    /**
+     * Handles incoming messages.
+     * @param msg The message to be handled.
+     */
     public void onMessage(Msg msg) {
-        currentTransaction.computeState(msg);
+        if (currentTransaction != null && currentTransaction.getId().equals(msg.transactionId)) {
+            currentTransaction.computeState(msg);
+        } else {
+            debug("Discarded message for inactive transaction: " + msg.transactionId);
+        }
     }
 
     /// For testing
