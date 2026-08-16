@@ -1,6 +1,10 @@
 plugins {
     id 'java'
     id 'application'
+    id 'pmd'
+    id 'jacoco'
+    id 'com.github.spotbugs' version '6.5.10'
+    id 'com.diffplug.spotless' version '8.9.0'
 }
 
 application {
@@ -16,6 +20,10 @@ def versions = [
     ScalaBinary: "2.13"
 ]
 
+configurations {
+    cpd
+}
+
 dependencies {
     implementation platform("com.typesafe.akka:akka-bom_${versions.ScalaBinary}:2.6.13")
 
@@ -27,10 +35,19 @@ dependencies {
 	testImplementation(platform('org.junit:junit-bom:6.0.1'))
 	testImplementation('org.junit.jupiter:junit-jupiter')
 	testRuntimeOnly('org.junit.platform:junit-platform-launcher')
+
+    // Architecture rules expressed as tests
+    testImplementation 'com.tngtech.archunit:archunit-junit5:1.5.0'
+
+    // CPD ships with PMD but has its own CLI jar
+    cpd "net.sourceforge.pmd:pmd-cli:7.26.0"
+    cpd "net.sourceforge.pmd:pmd-java:7.26.0"
 }
 
 test {
-	useJUnitPlatform()
+	// The callback contract is a end-of-development checklist, not a regression:
+	// running it in CI would keep the build red until the very last callback lands.
+	useJUnitPlatform { excludeTags 'contract' }
 	testLogging {
 		events "passed", "skipped", "failed"
 	}
@@ -38,6 +55,237 @@ test {
 
 compileJava {
     options.compilerArgs += ["-Xlint:deprecation"]
+}
+
+// ---------------------------------------------------------------------------
+// Static code analysis
+// ---------------------------------------------------------------------------
+
+pmd {
+    toolVersion = '7.26.0'
+    // Drop PMD's noisy default rulesets in favour of our own curated one
+    ruleSets = []
+    ruleSetFiles = files('config/pmd/ruleset.xml')
+    // Report findings without turning the build red (for now)
+    ignoreFailures = true
+    // Print findings as "<file>:<line>:\t<Rule>:\t<message>", which the problem matcher
+    // in .vscode/tasks.json turns into editor diagnostics. This is the format every
+    // other diagnostic source in this file imitates.
+    consoleOutput = true
+}
+
+// An UP-TO-DATE task prints nothing, which the editor reads as "no findings" and clears
+// the Problems panel. Re-running is cheap; a silently emptied panel is not.
+tasks.withType(Pmd).configureEach {
+    outputs.upToDateWhen { false }
+}
+
+spotbugs {
+    toolVersion = '4.10.3'
+    // valueOf() rather than Effort.MAX / Confidence.MEDIUM: Groovy resolves the bare
+    // constants to their inner Class, and plain strings are deprecated in Gradle 9.
+    effort = com.github.spotbugs.snom.Effort.valueOf('MAX')
+    // Confidence, not severity: LOW reports everything the detectors suspect. Costs 7
+    // findings over MEDIUM here, one of which is a real bug, so it is worth the noise.
+    reportLevel = com.github.spotbugs.snom.Confidence.valueOf('LOW')
+    excludeFilter = file('config/spotbugs/exclude.xml')
+    ignoreFailures = true
+}
+
+tasks.withType(com.github.spotbugs.snom.SpotBugsTask).configureEach {
+    reports {
+        html.required = true      // for humans
+        sarif.required = true     // machine-readable input for `staticAnalysis` below
+    }
+    outputs.upToDateWhen { false }
+}
+
+// Only it.unitn.ds.regression is ours; the rest of src/test is course template we do not
+// get to change, so findings there would be unactionable.
+tasks.named('pmdTest') {
+    include '**/it/unitn/ds/regression/**', '**/it/unitn/ds/contract/**'
+}
+
+// Logger and NetworkChannel are course-template infrastructure: same reasoning as above.
+tasks.named('pmdMain') {
+    exclude '**/Logger.java', '**/NetworkChannel.java'
+}
+
+spotbugsTest {
+    onlyAnalyze = ['it.unitn.ds.regression.-', 'it.unitn.ds.contract.-']
+}
+
+// --- staticAnalysis ----------------------------------------------------------
+// PMD prints its own findings; SpotBugs cannot, so this task reads its SARIF and
+// prints it in PMD's format. One format = one problem matcher in .vscode/tasks.json.
+
+// Explicit markers delimit one analysis pass. The watch task's problem matcher uses them
+// to know when to clear the previous diagnostics: Gradle's own "> Task :x" lines cannot be
+// trusted for this, because the rich console groups output and can emit a task's header
+// after the findings it produced.
+def analysisBegin = tasks.register('analysisBegin') {
+    doLast { println '=== analysis: begin ===' }
+}
+
+tasks.matching { it.name in ['pmdMain', 'pmdTest', 'spotbugsMain', 'spotbugsTest'] }.configureEach {
+    mustRunAfter analysisBegin
+}
+
+tasks.register('staticAnalysis') {
+    description = 'Runs PMD and SpotBugs over main and test sources, with editor-clickable output'
+    group = 'verification'
+
+    dependsOn analysisBegin, 'pmdMain', 'pmdTest', 'spotbugsMain', 'spotbugsTest'
+
+    def reports = layout.buildDirectory.dir('reports')
+    def sourceRoots = (sourceSets.main.java.srcDirs + sourceSets.test.java.srcDirs).toList()
+
+    doLast {
+        ['main', 'test'].each { sourceSet ->
+            def sarif = reports.get().file("spotbugs/${sourceSet}.sarif").asFile
+            if (!sarif.exists()) {
+                return
+            }
+            new groovy.json.JsonSlurper().parse(sarif).runs[0].results.each { r ->
+                def loc = r.locations[0].physicalLocation
+                // SARIF paths are relative to the source root ("it/unitn/ds/Foo.java"),
+                // which no editor can resolve on its own.
+                def uri = loc.artifactLocation.uri
+                def resolved = sourceRoots.collect { new File(it, uri) }.find { it.exists() }
+                // Class-level findings (an unused field) carry no region: use line 1.
+                def line = loc.region?.startLine ?: 1
+                println "${resolved ? resolved.absolutePath : uri}:${line}:\t${r.ruleId}:\t${r.message.text}"
+            }
+        }
+
+        // Severities are the tools' own: PMD priority 1-2 / 3 / 4-5, SpotBugs SARIF level.
+        // The problem matcher flattens everything to "warning", so this is the only place
+        // the distinction survives.
+        def counts = [error: 0, warning: 0, info: 0]
+
+        ['main', 'test'].each { sourceSet ->
+            def pmdXml = reports.get().file("pmd/${sourceSet}.xml").asFile
+            if (pmdXml.exists()) {
+                new groovy.xml.XmlSlurper().parse(pmdXml).file.violation.each { v ->
+                    def priority = v.@priority.toInteger()
+                    counts[priority <= 2 ? 'error' : (priority == 3 ? 'warning' : 'info')]++
+                }
+            }
+            def sarif = reports.get().file("spotbugs/${sourceSet}.sarif").asFile
+            if (sarif.exists()) {
+                new groovy.json.JsonSlurper().parse(sarif).runs[0].results.each { r ->
+                    counts[[error: 'error', warning: 'warning'].get(r.level, 'info')]++
+                }
+            }
+        }
+
+        def total = counts.values().sum()
+        println "Errors: ${counts.error}   Warnings: ${counts.warning}   Info: ${counts.info}   (${total} total)"
+        println '=== analysis: end ==='
+    }
+}
+
+// --- CPD: duplicated blocks --------------------------------------------------
+// Token-based, so it finds copies even after variables were renamed.
+
+tasks.register('cpd', JavaExec) {
+    description = 'Reports duplicated code blocks'
+    group = 'verification'
+
+    def reportDir = layout.buildDirectory.dir('reports/cpd')
+    def xml = reportDir.get().file('cpd.xml').asFile
+
+    classpath = configurations.cpd
+    mainClass = 'net.sourceforge.pmd.cli.PmdCli'
+    args = ['cpd',
+            '--minimum-tokens', '60',
+            '--language', 'java',
+            '--dir', 'src/main/java',
+            '--dir', 'src/test/java/it/unitn/ds/regression',
+            '--dir', 'src/test/java/it/unitn/ds/contract',
+            '--format', 'xml',
+            '--report-file', xml.absolutePath]
+    // CPD exits non-zero when it finds duplication; that is a report, not a build error.
+    ignoreExitValue = true
+
+    doFirst { reportDir.get().asFile.mkdirs() }
+
+    // Re-print the XML as "<file>:<line>:" lines so the VS Code problem matcher can pick
+    // duplicates up like any other finding. One entry per file involved, so both ends of
+    // a duplication are navigable.
+    doLast {
+        if (!xml.exists()) {
+            return
+        }
+        def duplications = new groovy.xml.XmlSlurper().parse(xml).duplication
+        duplications.each { d ->
+            def files = d.file.collect { "${it.@path}:${it.@line}" }
+            d.file.each { f ->
+                def others = files - "${f.@path}:${f.@line}".toString()
+                println "${f.@path}:${f.@line}:\tCPD:\t${d.@lines} duplicated lines, also at ${others.join(', ')}"
+            }
+        }
+        println "Duplications: ${duplications.size()}   (report: ${xml.absolutePath})"
+    }
+}
+
+// --- Formatting --------------------------------------------------------------
+// Spotless rewrites rather than reports: `spotlessApply` fixes, `spotlessCheck` verifies.
+// enforceCheck is off so that `check` does not fail on formatting until you have run
+// spotlessApply once and committed the resulting (large) diff.
+
+spotless {
+    enforceCheck = false
+    java {
+        target fileTree('src') { include '**/*.java' }
+        targetExclude 'src/main/java/it/unitn/ds/Abstract*.java',
+                      'src/main/java/it/unitn/ds/Logger.java',
+                      'src/test/java/it/unitn/ds/TestsCommons.java',
+                      'src/test/java/it/unitn/ds/base/**'
+        palantirJavaFormat()      // 4-space indent, closest to the current style
+        removeUnusedImports()
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+}
+
+tasks.register('callbackContract', Test) {
+    description = 'Checks that every callback the graders observe is actually invoked'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform { includeTags 'contract' }
+    filter { includeTestsMatching 'it.unitn.ds.contract.*' }
+    testLogging { events "passed", "failed" }
+    ignoreFailures = true
+    outputs.upToDateWhen { false }
+}
+
+// --- Test failures as editor diagnostics -------------------------------------
+//
+// Gradle reports failures as a stack trace, which no editor can act on. The first
+// frame belonging to this project is the assertion that actually failed; printing it
+// in the format above reuses the same problem matcher.
+
+tasks.withType(Test).configureEach {
+    def sourceRoots = (sourceSets.main.java.srcDirs + sourceSets.test.java.srcDirs).toList()
+
+    afterTest { desc, result ->
+        result.exceptions.each { e ->
+            def frame = e.stackTrace.find { it.className.startsWith('it.unitn.ds') && it.lineNumber > 0 }
+            def type = e.class.simpleName
+            def message = (e.message ?: '').readLines().find { it.trim() } ?: type
+            if (frame) {
+                def relative = frame.className.substring(0, frame.className.lastIndexOf('.')).replace('.', '/')
+                def resolved = sourceRoots.collect { new File(it, "${relative}/${frame.fileName}") }.find { it.exists() }
+                if (resolved) {
+                    println "${resolved.absolutePath}:${frame.lineNumber}:\t${type}:\t${desc.name}: ${message.trim()}"
+                    return
+                }
+            }
+            println "${desc.className}:1:\t${type}:\t${desc.name}: ${message.trim()}"
+        }
+    }
 }
 
 run {
@@ -58,12 +306,41 @@ tasks.register('regression', Test) {
     filter {
         includeTestsMatching 'it.unitn.ds.regression.*'
     }
+    // The callback contract is a to-do list, not a regression: red until implemented
+    useJUnitPlatform { excludeTags 'contract' }
 
     testLogging {
         events "passed", "failed", "skipped"
         showStandardStreams = true
     }
     outputs.upToDateWhen { false }
+}
+
+// --- Coverage ----------------------------------------------------------------
+// Belongs with the tests: it runs them, it does not analyse sources.
+
+jacoco {
+    toolVersion = '0.8.15'
+}
+
+tasks.named('jacocoTestReport') {
+    // Driven by `regression`, not `test`: the base suite is slow and currently red.
+    // Any Test task that has already run contributes its data.
+    dependsOn 'regression'
+    executionData fileTree(layout.buildDirectory).include('jacoco/*.exec')
+    reports {
+        html.required = true
+        xml.required = false
+    }
+    // Course template: infrastructure we neither wrote nor test.
+    classDirectories.setFrom(files(classDirectories.files.collect {
+        fileTree(dir: it, exclude: [
+            'it/unitn/ds/Abstract*',
+            'it/unitn/ds/Logger*',
+            'it/unitn/ds/NetworkChannel*',
+            'it/unitn/ds/Main*'
+        ])
+    }))
 }
 
 javadoc {
