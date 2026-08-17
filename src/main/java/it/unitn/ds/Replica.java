@@ -102,6 +102,13 @@ public class Replica extends AbstractReplica implements DistributedActor {
         }
         this.tell(msg, target);
     }
+
+    /**
+     * This method returns true if the replica is currently the coordinator.
+     */
+    public boolean isCoordinator() {
+        return this.id == this.coordinatorID;
+    }
     ////////////////////////////////////////////
 
     @Override

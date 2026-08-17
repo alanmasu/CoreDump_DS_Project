@@ -27,8 +27,8 @@ public abstract class Transaction implements Comparable<Transaction> {
      * Represents a unique identifier for a transaction, consisting of the initiator ActorRef and a progressively increasing transaction ID on the initiator.
      */
     public static class TransactionId implements Serializable {
-        final ActorRef initiator;
-        final int transactionId;
+        public final ActorRef initiator;
+        public final int transactionId;
 
         public TransactionId(ActorRef initiator, int transactionId) {
             this.initiator = initiator;
