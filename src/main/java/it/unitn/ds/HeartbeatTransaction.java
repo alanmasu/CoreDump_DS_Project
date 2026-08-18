@@ -123,8 +123,15 @@ public final class HeartbeatTransaction extends Transaction {
     private long watchdogVersion;
 
 
-    public HeartbeatTransaction(TransactionId transactionId, Replica owner) {
-        super(transactionId, owner);
+    /**
+     * Creates a heartbeat transaction owned by a replica.
+     *
+     * @param transactionId coordinator-term transaction
+     * @param owner replica that owns the transaction
+     * @param startEpochPair epoch pair associated with transaction startup
+     */
+    public HeartbeatTransaction(TransactionId transactionId, Replica owner, EpochPair startEpochPair) {
+        super(transactionId, owner, startEpochPair);
 
         this.replica = owner;
         this.state = State.STOPPED;

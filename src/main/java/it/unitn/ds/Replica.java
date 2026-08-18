@@ -130,7 +130,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
 
         this.heartbeatTransaction = new HeartbeatTransaction(
             heartbeatTransactionId,
-            this
+            this,
+            null
         );
 
         scheduleTransaction(this.heartbeatTransaction);
