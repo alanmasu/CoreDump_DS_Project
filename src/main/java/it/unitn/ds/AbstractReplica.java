@@ -39,7 +39,8 @@ public abstract class AbstractReplica extends AbstractActor {
         this.id = id;
         this.coordinatorBeatInterval = coordinatorBeatInterval;
         this.listener = listener;
-        setNetworkLatency(minLatency, maxLatency);
+        this.minLatency = minLatency;
+        this.maxLatency = maxLatency;
     }
 
     // =================================================================================
@@ -139,6 +140,7 @@ public abstract class AbstractReplica extends AbstractActor {
         /**
          * The identifier of the coordinator replica within the group.
          */
+        @SuppressWarnings("PMD.FieldNamingConventions") // template API: the graders' tests reference this name
         public final int coordinator_id;
 
         /**
@@ -170,6 +172,7 @@ public abstract class AbstractReplica extends AbstractActor {
         /**
          * Enumeration of message types that can trigger a crash.
          */
+        @SuppressWarnings("PMD.FieldNamingConventions") // template API: constant names are part of the contract
         public enum Type {
             /**
              * Crash immediately.
@@ -210,6 +213,7 @@ public abstract class AbstractReplica extends AbstractActor {
          * meaning it will stop responding to any further messages.
          * </p>
          */
+        @SuppressWarnings("PMD.FieldNamingConventions") // template API: the graders' tests reference this name
         public final int after_n_messages_of_type;
 
         /**
@@ -245,6 +249,13 @@ public abstract class AbstractReplica extends AbstractActor {
             }
             return false;
         }
+
+        @Override
+        public int hashCode() {
+            int result = type.hashCode();
+            result = 31 * result + Integer.hashCode(after_n_messages_of_type);
+            return result;
+        }
     }
 
     public static class CoordinatorElected implements Serializable {
@@ -254,6 +265,13 @@ public abstract class AbstractReplica extends AbstractActor {
         public CoordinatorElected(int newCoordinatorId, int replicaId) {
             this.newCoordinatorId = newCoordinatorId;
             this.replicaId = replicaId;
+        }
+
+        @Override
+        public int hashCode() {
+            int result = Integer.hashCode(newCoordinatorId);
+            result = 31 * result + Integer.hashCode(replicaId);
+            return result;
         }
 
         @Override
@@ -292,6 +310,14 @@ public abstract class AbstractReplica extends AbstractActor {
         }
 
         @Override
+        public int hashCode() {
+            int result = Integer.hashCode(replicaId);
+            result = 31 * result + Integer.hashCode(index);
+            result = 31 * result + Integer.hashCode(value);
+            return result;
+        }
+
+        @Override
         public String toString() {
             return "UpdateApplied(replica=" + replicaId + ", index=" + index + ", value=" + value + ")";
         }
@@ -313,6 +339,13 @@ public abstract class AbstractReplica extends AbstractActor {
                 return o.replicaId == this.replicaId && o.crashedCoordinatorId == this.crashedCoordinatorId;
             }
             return false;
+        }
+
+        @Override
+        public int hashCode() {
+            int result = Integer.hashCode(replicaId);
+            result = 31 * result + Integer.hashCode(crashedCoordinatorId);
+            return result;
         }
 
         @Override

@@ -41,8 +41,8 @@ classDiagram
             +Msg(TransactionId tId, EpochPair epochPair, ActorRef sender)
         }
 
-        class TestMsg {
-            <<TestTransaction>>
+        class ProbeMsg {
+            <<ProbeTransaction>>
             +String content
         }
 
@@ -93,7 +93,7 @@ classDiagram
     }
 
     Msg ..|> Serializable
-    TestMsg --|> Msg
+    ProbeMsg --|> Msg
     Result --|> Msg
     ReadResult --|> Result
     WriteResult --|> Result
