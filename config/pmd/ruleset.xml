@@ -1,0 +1,86 @@
+<?xml version="1.0"?>
+<ruleset name="CoreDump DS Project"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+
+    <description>
+        Real defects and maintainability problems only, no formatting or naming rules.
+        Rationale for each exclusion: scratch/StaticAnalysis_Exclusions.md
+    </description>
+
+    <rule ref="category/java/errorprone.xml">
+        <!-- Nothing is ever serialized: single JVM, no Akka remoting -->
+        <exclude name="MissingSerialVersionUID"/>
+    </rule>
+
+    <rule ref="category/java/multithreading.xml">
+        <!-- Actor state is thread-confined; Akka guarantees visibility between messages -->
+        <exclude name="UseConcurrentHashMap"/>
+    </rule>
+
+    <rule ref="category/java/bestpractices.xml">
+        <exclude name="GuardLogStatement"/>
+        <exclude name="SystemPrintln"/>
+        <exclude name="UnitTestContainsTooManyAsserts"/>
+        <exclude name="UnitTestShouldIncludeAssert"/>
+    </rule>
+
+    <!-- Logger (it is the sanctioned System.out wrapper), Main (banners, never under test), 
+         and our own tests (console output is the point). Template tests are excluded in 
+         build.gradle, not here. -->
+    <rule ref="category/java/bestpractices.xml/SystemPrintln">
+        <properties>
+            <property name="violationSuppressXPath"
+                      value="./ancestor::ClassDeclaration[@SimpleName='Logger' or @SimpleName='Main']
+                             | ./ancestor::CompilationUnit[@PackageName='it.unitn.ds.regression']"/>
+        </properties>
+    </rule>
+
+    <!-- Picked individually: the rest of these two categories is too opinionated -->
+    <rule ref="category/java/design.xml/CollapsibleIfStatements"/>
+    <rule ref="category/java/design.xml/SimplifiedTernary"/>
+    <rule ref="category/java/design.xml/UselessOverridingMethod"/>
+    <rule ref="category/java/design.xml/ExceptionAsFlowControl"/>
+
+    <rule ref="category/java/performance.xml/AvoidInstantiatingObjectsInLoops"/>
+    <rule ref="category/java/performance.xml/ConsecutiveAppendsShouldReuse"/>
+    <rule ref="category/java/performance.xml/InefficientStringBuffering"/>
+
+    <!-- Codestyle: only rules that catch mistakes, not layout. Layout is Spotless' job. -->
+    <!-- ArchUnit rules assert through .check(), which PMD does not recognise -->
+    <rule ref="category/java/bestpractices.xml/UnitTestShouldIncludeAssert">
+        <properties>
+            <property name="violationSuppressXPath"
+                      value="./ancestor::ClassDeclaration[@SimpleName='TestCallbackContract']"/>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/codestyle.xml/ControlStatementBraces"/>
+    <rule ref="category/java/codestyle.xml/UnnecessaryImport"/>
+    <rule ref="category/java/codestyle.xml/UselessParentheses"/>
+    <rule ref="category/java/codestyle.xml/ClassNamingConventions"/>
+    <rule ref="category/java/codestyle.xml/MethodNamingConventions"/>
+    <rule ref="category/java/codestyle.xml/FieldNamingConventions"/>
+
+    <!-- Javadoc on the public API only; the defaults demand it everywhere -->
+    <!-- <rule ref="category/java/documentation.xml/CommentRequired"> -->
+    <!--     <properties> -->
+    <!--         Template classes in src/main: not ours to document -->
+    <!--         <property name="violationSuppressXPath" -->
+    <!--                   value="./ancestor-or-self::ClassDeclaration[@SimpleName='AbstractClient' -->
+    <!--                                                           or @SimpleName='AbstractReplica' -->
+    <!--                                                           or @SimpleName='Logger']"/> -->
+    <!--         <property name="classCommentRequirement" value="required"/> -->
+    <!--         <property name="publicMethodCommentRequirement" value="required"/> -->
+    <!--         <property name="protectedMethodCommentRequirement" value="ignored"/> -->
+    <!--         <property name="methodWithOverrideCommentRequirement" value="ignored"/> -->
+    <!--         <property name="accessorCommentRequirement" value="ignored"/> -->
+    <!--         <property name="fieldCommentRequirement" value="ignored"/> -->
+    <!--         <property name="enumCommentRequirement" value="ignored"/> -->
+    <!--         <property name="serialVersionUIDCommentRequired" value="ignored"/> -->
+    <!--         <property name="serialPersistentFieldsCommentRequired" value="ignored"/> -->
+    <!--     </properties> -->
+    <!-- </rule> -->
+
+</ruleset>
