@@ -151,6 +151,7 @@ public class TestHeartbeatTransaction {
             coordinator.tell(
                 new HeartbeatTickMsg(
                     unknownTransactionId,
+                    null,
                     coordinator
                 ),
                 ActorRef.noSender()
@@ -163,6 +164,7 @@ public class TestHeartbeatTransaction {
             coordinator.tell(
                 new HeartbeatTickMsg(
                     activeTransactionId,
+                    null,
                     coordinator
                 ),
                 ActorRef.noSender()

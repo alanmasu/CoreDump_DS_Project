@@ -42,13 +42,15 @@ public final class HeartbeatTransaction extends Transaction {
          * Creates a heartbeat tick for the given heartbeat transaction.
          *
          * @param transactionId identifier of the current heartbeat transaction
+         * @param epochPair epoch pair associated with the heartbeat transaction
          * @param sender coordinator Replica that scheduled the tick
          */
         public HeartbeatTickMsg(
             TransactionId transactionId,
+            EpochPair epochPair,
             ActorRef sender
         ) {
-            super(transactionId, null, sender);
+            super(transactionId, epochPair, sender);
         }
     }
 
@@ -68,11 +70,17 @@ public final class HeartbeatTransaction extends Transaction {
          * Creates a heartbeat sent by the current coordinator.
          *
          * @param transactionId identifier of the current heartbeat transaction
+         * @param epochPair epoch pair associated with the heartbeat transaction
          * @param sender coordinator Replica broadcasting the heartbeat
          * @param coordinatorId numeric identifier of the current coordinator
          */
-        public HeartbeatMsg(TransactionId transactionId, ActorRef sender, int coordinatorId) {
-            super(transactionId, null, sender);
+        public HeartbeatMsg(
+            TransactionId transactionId,
+            EpochPair epochPair,
+            ActorRef sender,
+            int coordinatorId
+        ) {
+            super(transactionId, epochPair, sender);
             this.coordinatorId = coordinatorId;
         }
     }
@@ -94,11 +102,17 @@ public final class HeartbeatTransaction extends Transaction {
          * Creates a watchdog-expiration message.
          *
          * @param transactionId identifier of the current heartbeat transaction
+         * @param epochPair epoch pair associated with the heartbeat transaction
          * @param sender follower Replica that scheduled the watchdog
          * @param watchdogVersion generation of the watchdog that expired
          */
-        public WatchdogExpiredMsg(TransactionId transactionId, ActorRef sender, long watchdogVersion) {
-            super(transactionId, null, sender);
+        public WatchdogExpiredMsg(
+            TransactionId transactionId,
+            EpochPair epochPair,
+            ActorRef sender,
+            long watchdogVersion
+        ) {
+            super(transactionId, epochPair, sender);
             this.watchdogVersion = watchdogVersion;
         }
     }
@@ -190,6 +204,7 @@ public final class HeartbeatTransaction extends Transaction {
                             replica.getSelf(),
                             new HeartbeatTickMsg(
                                 getId(),
+                                startEpochPair,
                                 replica.getSelf()
                             ),
                             replica.getContext().system().dispatcher(),
@@ -219,6 +234,7 @@ public final class HeartbeatTransaction extends Transaction {
                             replica.getSelf(),
                             new WatchdogExpiredMsg(
                                 getId(),
+                                startEpochPair,
                                 replica.getSelf(),
                                 watchdogVersion
                             ),
@@ -240,6 +256,7 @@ public final class HeartbeatTransaction extends Transaction {
         replica.broadcast(
             new HeartbeatMsg(
                 getId(),
+                startEpochPair,
                 replica.getSelf(),
                 replica.id
             )
