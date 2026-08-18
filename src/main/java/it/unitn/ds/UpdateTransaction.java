@@ -24,10 +24,10 @@ public class UpdateTransaction extends Transaction {
 
     protected UpdateTransactionState state;
 
-    /** Constructor for UpdateTransaction whit no optional parameters -> usefull for coordinator*/
-    public UpdateTransaction(TransactionId id, Replica owner, EpochPair startEpochPair, int index, int value) {
-        this(id, owner, startEpochPair, index, value, null, null);
-    }
+    // /** Constructor for UpdateTransaction whit no optional parameters -> usefull for coordinator*/
+    // public UpdateTransaction(TransactionId id, Replica owner, EpochPair startEpochPair, int index, int value) {
+    //     this(id, owner, startEpochPair, index, value, null, null);
+    // }
 
     /** Constructor for UpdateTransaction with destination ActorRef -> usefull for update participant*/
     public UpdateTransaction(TransactionId id, Replica owner, EpochPair startEpochPair, int index, int value, ActorRef destination) {

@@ -4,6 +4,7 @@ import akka.actor.ActorRef;
 import akka.actor.Props;
 import it.unitn.ds.TestTransaction.TestMsg;
 import it.unitn.ds.Transaction.TransactionId;
+import it.unitn.ds.UpdateTransaction.UpdateMsg;
 
 import java.util.Optional;
 import java.util.LinkedList;
@@ -156,6 +157,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
+                .match(UpdateMsg.class, this::onUpdateMsg)
                 .match(TestMsg.class, this::onTestMsg)
                 .build();
     }
@@ -173,6 +175,12 @@ public class Replica extends AbstractReplica implements DistributedActor {
         }
     }
     
+    void onUpdateMsg(UpdateMsg msg){
+        if(msg.transactionId.initiator.equals(this.getSelf())){
+            UpdateTransaction transaction = new UpdateTransaction(msg.transactionId, this, msg.epochPair, msg.index, msg.index, msg.transactionId.initiator);
+            this.scheduleTransaction(transaction);
+        }
+    }
 
     /// For testing
     public void onTestMsg(TestMsg msg) {
