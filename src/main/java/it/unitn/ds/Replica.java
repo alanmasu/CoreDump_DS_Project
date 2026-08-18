@@ -16,8 +16,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
     private int transactionCounter;
     private EpochPair epochPair;
 
-    int positions[];
-    int coordinatorID;
+    private int positions[];
+    private int coordinatorID;
 
     ///////////// For chashing ////////////
     private enum CrashStatus {
@@ -147,11 +147,11 @@ public class Replica extends AbstractReplica implements DistributedActor {
         return new TransactionId(this.getSelf(), transactionCounter++);
     }
 
-    EpochPair getEpochPair() {
+    public EpochPair getEpochPair() {
         return this.epochPair;
     }
 
-    void setEpochPair(EpochPair epochPair) throws IllegalArgumentException {
+    public void setEpochPair(EpochPair epochPair) throws IllegalArgumentException {
         if (epochPair == null) {
             throw new IllegalArgumentException("EpochPair cannot be null");
         }
@@ -159,6 +159,20 @@ public class Replica extends AbstractReplica implements DistributedActor {
             throw new IllegalArgumentException("New epochPair must be greater than or equal to the current epochPair");
         }
         this.epochPair = epochPair;
+    }
+
+    public int getPosition(int index){
+        if(index < 0 || index >= AbstractReplica.POSITIONS_LIST_LENGTH){
+            throw new IllegalArgumentException("Index out of bounds. Valid range: 0 to " + (AbstractReplica.POSITIONS_LIST_LENGTH - 1));
+        }
+        return this.positions[index];
+    }
+
+    public void setPosition(int index, int value){
+        if(index < 0 || index >= AbstractReplica.POSITIONS_LIST_LENGTH){
+            throw new IllegalArgumentException("Index out of bounds. Valid range: 0 to " + (AbstractReplica.POSITIONS_LIST_LENGTH - 1));
+        }
+        this.positions[index] = value;
     }
 
     @Override
