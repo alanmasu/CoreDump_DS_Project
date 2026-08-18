@@ -1,8 +1,11 @@
 package it.unitn.ds;
 
+import akka.actor.ActorContext;
 import akka.actor.ActorRef;
 import akka.actor.Cancellable;
 import it.unitn.ds.Transaction.TransactionId;
+import java.util.concurrent.TimeUnit;
+import scala.concurrent.duration.Duration;
 
 public interface DistributedActor {
     /**
@@ -10,6 +13,12 @@ public interface DistributedActor {
      *
      */
     public ActorRef getSelf();
+
+    /**
+     * Returns the context of the implementing actor. Satisfied for free by any
+     * AbstractActor subclass; declared here so the default methods below can use it.
+     */
+    public ActorContext getContext();
 
     /**
      * Called when a transaction is completed. The implementing actor can perform any necessary actions upon transaction completion.
@@ -26,13 +35,23 @@ public interface DistributedActor {
     public void scheduleTransaction(Transaction transaction);
 
     /**
-     * Schedules a message to be sent to itself after a specified duration. 
-     * 
+     * Schedules a message to be sent to itself after a specified duration.
+     *
      * @param delay The delay after which the message should be sent in milliseconds.
      * @param msg The message to be sent.
      * @return A Cancellable object that can be used to cancel the scheduled message.
      */
-    public Cancellable scheduleToItself(long delay, Msg msg);
+    default Cancellable scheduleToItself(long delay, Msg msg) {
+        return getContext()
+                .system()
+                .scheduler()
+                .scheduleOnce(
+                        Duration.create(delay, TimeUnit.MILLISECONDS),
+                        getSelf(),
+                        msg,
+                        getContext().system().dispatcher(),
+                        getSelf());
+    }
 
     /**
      * Sends a message to a specific actor.

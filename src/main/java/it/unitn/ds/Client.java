@@ -1,16 +1,12 @@
 package it.unitn.ds;
 
 import akka.actor.ActorRef;
-import akka.actor.Cancellable;
 import akka.actor.Props;
 import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.Transaction.TransactionId;
-import scala.concurrent.duration.Duration;
-
 import java.util.LinkedList;
 import java.util.Optional;
 import java.util.Queue;
-import java.util.concurrent.TimeUnit;
 
 public class Client extends AbstractClient implements DistributedActor {
 
@@ -72,17 +68,6 @@ public class Client extends AbstractClient implements DistributedActor {
     }
 
     @Override
-    public Cancellable scheduleToItself(long delay, Msg msg) {
-        return getContext().system().scheduler().scheduleOnce(
-                Duration.create(delay, TimeUnit.MILLISECONDS),
-                getSelf(),
-                msg,
-                getContext().system().dispatcher(),
-                getSelf()
-        );
-    }
-
-    @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
                 .match(ProbeMsg.class, this::onProbeMsg)
@@ -122,17 +107,17 @@ public class Client extends AbstractClient implements DistributedActor {
         }
     }
 
-    void defaultDispatcher(Object msg){
-        if (msg instanceof Msg){
+    void defaultDispatcher(Object msg) {
+        if (msg instanceof Msg) {
             onMessage((Msg) msg);
-        } 
+        }
     }
 
     /// For testing
     public void onProbeMsg(ProbeMsg msg) {
         if (ProbeTransaction.MSG_START.equals(msg.content)) {
             // TODO: Pass the correct startEpochPair to the ProbeTransaction constructor
-            ProbeTransaction transaction = new ProbeTransaction(msg.transactionId, this, null,  msg, msg.sender);
+            ProbeTransaction transaction = new ProbeTransaction(msg.transactionId, this, null, msg, msg.sender);
             scheduleTransaction(transaction);
         } else {
             onMessage(msg);

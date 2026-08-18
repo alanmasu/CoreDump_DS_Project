@@ -1,12 +1,9 @@
 package it.unitn.ds;
 
 import akka.actor.ActorRef;
-import akka.actor.Cancellable;
 import akka.actor.Props;
 import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.Transaction.TransactionId;
-import scala.concurrent.duration.Duration;
-import java.util.concurrent.TimeUnit;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -180,17 +177,6 @@ public class Replica extends AbstractReplica implements DistributedActor {
         return id;
     }
 
-    @Override
-    public Cancellable scheduleToItself(long delay, Msg msg) {
-        return getContext().system().scheduler().scheduleOnce(
-                Duration.create(delay, TimeUnit.MILLISECONDS),
-                getSelf(),
-                msg,
-                getContext().system().dispatcher(),
-                getSelf()
-        );
-    }
-
     public EpochPair getEpochPair() {
         return this.epochPair;
     }
@@ -205,7 +191,6 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.epochPair = epochPair;
     }
 
-    
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
@@ -230,18 +215,19 @@ public class Replica extends AbstractReplica implements DistributedActor {
     /// For testing
     public void onProbeMsg(ProbeMsg msg) {
         if (ProbeTransaction.MSG_START.equals(msg.content)) {
-            ProbeTransaction transaction = new ProbeTransaction(msg.transactionId, this, msg.epochPair, msg, msg.sender);
+            ProbeTransaction transaction =
+                    new ProbeTransaction(msg.transactionId, this, msg.epochPair, msg, msg.sender);
             scheduleTransaction(transaction);
         } else {
             onMessage(msg);
         }
     }
 
-    void defaultDispatcher(Object msg){
-        if (msg instanceof Msg){
+    void defaultDispatcher(Object msg) {
+        if (msg instanceof Msg) {
             onMessage((Msg) msg);
-        } 
-    }       
+        }
+    }
 
     /**
      * This callback method is invoked whenever a message is recieved by the replica and the parameter allows to differentiate the type of message.
