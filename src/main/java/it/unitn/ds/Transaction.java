@@ -11,15 +11,15 @@ public abstract class Transaction implements Comparable<Transaction> {
 
     protected Cancellable timeout;  
     protected final DistributedActor owner;  
-    protected EpochPair epochPair;  
+    protected final EpochPair startEpochPair;
     private final TransactionId id;  
     protected final List<Msg> history;  
 
-    public Transaction(TransactionId id, DistributedActor owner) {
+    public Transaction(TransactionId id, DistributedActor owner, EpochPair startEpochPair) {
         this.owner = owner;
         this.id = id;
         this.timeout = null;
-        this.epochPair = null;
+        this.startEpochPair = startEpochPair;
         this.history = new ArrayList<>();
     }
 
@@ -70,14 +70,14 @@ public abstract class Transaction implements Comparable<Transaction> {
 
     @Override
     public int compareTo(Transaction other) {
-        if (this.epochPair == null && other.epochPair == null) {
+        if (this.startEpochPair == null && other.startEpochPair == null) {
             return 0;
-        } else if (this.epochPair == null) {
+        } else if (this.startEpochPair == null) {
             return -1;
-        } else if (other.epochPair == null) {
+        } else if (other.startEpochPair == null) {
             return 1;
         } else {
-            return this.epochPair.compareTo(other.epochPair);
+            return this.startEpochPair.compareTo(other.startEpochPair);
         }
     }
 
@@ -85,7 +85,7 @@ public abstract class Transaction implements Comparable<Transaction> {
     public String toString() {
         return "Transaction[" +
                 "id: " + id +
-                ", epochPair: " + epochPair +
+                ", startEpochPair: " + startEpochPair +
                 ", owner: " + owner.getSelf().path().name() +
                 ", state: " + getState() +
                 ']';

@@ -15,6 +15,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     private static final int INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE = 0;
     private Map<Integer, ActorRef> groupOfReplicas;
     private LinkedList<Transaction> activeTransactions;
+    private int transactionCounter;
 
     int positions[];
     int coordinatorID;
@@ -44,6 +45,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.replicaStatus = CrashStatus.NONE;
         this.crashCount = 0;
         activeTransactions = new LinkedList<>();
+        transactionCounter = 0;
     }
 
     public static Props props(int id, int minLatency, int maxLatency, int coordinatorBeatInterval) {
@@ -202,6 +204,11 @@ public class Replica extends AbstractReplica implements DistributedActor {
     }
 
     @Override
+    public TransactionId getNextTransactionId() {
+        return new TransactionId(this.getSelf(), transactionCounter++);
+    }
+
+    @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
             .match(
@@ -240,7 +247,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     /// For testing
     public void onTestMsg(TestMsg msg) {
         if(msg.content.equals("start")){
-            TestTransaction transaction = new TestTransaction(msg.transactionId, this, msg, msg.sender);
+            TestTransaction transaction = new TestTransaction(msg.transactionId, this, msg.epochPair, msg, msg.sender);
             scheduleTransaction(transaction);
         }else{
             onMessage(msg);

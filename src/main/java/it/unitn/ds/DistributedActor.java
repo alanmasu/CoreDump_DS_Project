@@ -2,6 +2,7 @@ package it.unitn.ds;
 
 
 import akka.actor.ActorRef;
+import it.unitn.ds.Transaction.TransactionId;
 
 public interface DistributedActor {
     /**
@@ -32,6 +33,13 @@ public interface DistributedActor {
      * @param target The actor to which the message will be sent.
      */
     public void unicast(Msg msg, ActorRef target);
+
+    /**
+     * Returns the next transaction ID for the implementing actor.
+     *
+     * @return The next transaction ID.
+     */
+    public TransactionId getNextTransactionId();
 
 
     // TODO: this is not usefull for the Client Class

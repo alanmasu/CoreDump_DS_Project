@@ -6,12 +6,12 @@ public class TestTransaction extends Transaction {
 
     TestTransactionStartParameters startParameters;
 
-    public TestTransaction(TransactionId id, DistributedActor owner) {
-        this(id, owner, null , null);
+    public TestTransaction(TransactionId id, DistributedActor owner, EpochPair startEpochPair) {
+        this(id, owner, startEpochPair, null, null);
     }
     
-    public TestTransaction(TransactionId id, DistributedActor owner, TestMsg initialMsg, ActorRef targetActor) {
-        super(id, owner);
+    public TestTransaction(TransactionId id, DistributedActor owner, EpochPair startEpochPair, TestMsg initialMsg, ActorRef targetActor) {
+        super(id, owner, startEpochPair);
         if(initialMsg == null || targetActor == null) {
             this.startParameters = null;
         } else {
