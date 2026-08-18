@@ -12,12 +12,12 @@ public class ProbeTransaction extends Transaction {
 
     ProbeTransactionStartParameters startParameters;
 
-    public ProbeTransaction(TransactionId id, DistributedActor owner) {
-        this(id, owner, null, null);
+    public ProbeTransaction(TransactionId id, DistributedActor owner, EpochPair startEpochPair) {
+        this(id, owner, startEpochPair, null, null);
     }
 
-    public ProbeTransaction(TransactionId id, DistributedActor owner, ProbeMsg initialMsg, ActorRef targetActor) {
-        super(id, owner);
+    public ProbeTransaction(TransactionId id, DistributedActor owner, EpochPair startEpochPair, ProbeMsg initialMsg, ActorRef targetActor) {
+        super(id, owner, startEpochPair);
         // Left at its default null when either argument is missing; start() reports that.
         if (initialMsg != null && targetActor != null) {
             this.startParameters = new ProbeTransactionStartParameters();
