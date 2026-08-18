@@ -10,15 +10,14 @@ public abstract class Transaction {
 
     protected Cancellable timeout;
     protected final DistributedActor owner;
-    protected EpochPair epochPair;
+    protected final EpochPair startEpochPair;
     private final TransactionId id;
     protected final List<Msg> history;
 
-    public Transaction(TransactionId id, DistributedActor owner) {
+    public Transaction(TransactionId id, DistributedActor owner, EpochPair startEpochPair) {
         this.owner = owner;
         this.id = id;
-        // timeout and epochPair are left at their default null: no timer is scheduled and
-        // no epoch is known until the transaction actually starts.
+        this.startEpochPair = startEpochPair;
         this.history = new ArrayList<>();
     }
 
@@ -88,8 +87,8 @@ public abstract class Transaction {
     @Override
     public String toString() {
         return "Transaction[" + "id: "
-                + id + ", epochPair: "
-                + epochPair + ", owner: "
+                + id + ", startEpochPair: "
+                + startEpochPair + ", owner: "
                 + owner.getSelf().path().name() + ", state: "
                 + getState() + ']';
     }
