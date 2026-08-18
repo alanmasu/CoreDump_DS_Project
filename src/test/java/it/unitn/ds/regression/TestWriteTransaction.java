@@ -25,7 +25,7 @@ import akka.testkit.javadsl.TestKit;
 /**
  * This class test the WriteTransaction class.
  */
-public class TestWriteTransaction {
+class TestWriteTransaction {
     
     @BeforeAll
     static void setup() {
@@ -59,9 +59,9 @@ public class TestWriteTransaction {
                                              ActorRef.noSender());
 
         WriteResult result = probe.expectMsgClass(WriteResult.class);
-        assertEquals(result.value, TestsCommons.TEST_VALUE, "The value written should be the same as the one requested");
-        assertEquals(result.index, TestsCommons.TEST_INDEX, "The index written should be the same as the one requested");
-        assertEquals(result.success, true, "The write should be successful");
+        assertEquals(TestsCommons.TEST_VALUE, result.value, "The value written should be the same as the one requested");
+        assertEquals(TestsCommons.TEST_INDEX, result.index, "The index written should be the same as the one requested");
+        assertEquals(true, result.success, "The write should be successful");
 		
 		sys.system.terminate();
 	}
