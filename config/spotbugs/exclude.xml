@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter
+    xmlns="https://github.com/spotbugs/filter/3.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="https://github.com/spotbugs/filter/3.0.0 https://raw.githubusercontent.com/spotbugs/spotbugs/master/spotbugs/etc/findbugsfilter.xsd">
+
+    <!-- Nothing is ever serialized: single JVM, no Akka remoting, messages are Serializable
+         by Akka convention only. Same decision as MissingSerialVersionUID in the PMD
+         ruleset; revisit both together if Akka Remote or Cluster is ever enabled. -->
+    <Match>
+        <Bug pattern="SE_NO_SERIALVERSIONID"/>
+    </Match>
+
+    <!-- Course-template infrastructure, excluded from PMD too (see build.gradle). -->
+    <Match>
+        <Class name="~it\.unitn\.ds\.(Logger|NetworkChannel)(\$.*)?"/>
+    </Match>
+
+</FindBugsFilter>
