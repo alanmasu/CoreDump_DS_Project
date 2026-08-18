@@ -1,7 +1,7 @@
 package it.unitn.ds;
 
-
 import akka.actor.ActorRef;
+import akka.actor.Cancellable;
 import it.unitn.ds.Transaction.TransactionId;
 
 public interface DistributedActor {
@@ -25,6 +25,15 @@ public interface DistributedActor {
      * @param transaction The transaction to be scheduled.
      */
     public void scheduleTransaction(Transaction transaction);
+
+    /**
+     * Schedules a message to be sent to itself after a specified duration. 
+     * 
+     * @param delay The delay after which the message should be sent in milliseconds.
+     * @param msg The message to be sent.
+     * @return A Cancellable object that can be used to cancel the scheduled message.
+     */
+    public Cancellable scheduleToItself(long delay, Msg msg);
 
     /**
      * Sends a message to a specific actor.

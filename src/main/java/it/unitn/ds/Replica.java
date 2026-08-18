@@ -1,11 +1,14 @@
 package it.unitn.ds;
 
 import akka.actor.ActorRef;
+import akka.actor.Cancellable;
 import akka.actor.Props;
 import it.unitn.ds.TestTransaction.TestMsg;
 import it.unitn.ds.Transaction.TransactionId;
+import scala.concurrent.duration.Duration;
 
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import java.util.LinkedList;
 import java.util.Map;
 
@@ -145,6 +148,17 @@ public class Replica extends AbstractReplica implements DistributedActor {
     @Override
     public TransactionId getNextTransactionId() {
         return new TransactionId(this.getSelf(), transactionCounter++);
+    }
+
+    @Override
+    public Cancellable scheduleToItself(long delay, Msg msg) {
+        return getContext().system().scheduler().scheduleOnce(
+                Duration.create(delay, TimeUnit.MILLISECONDS),
+                getSelf(),
+                msg,
+                getContext().system().dispatcher(),
+                getSelf()
+        );
     }
 
     public EpochPair getEpochPair() {

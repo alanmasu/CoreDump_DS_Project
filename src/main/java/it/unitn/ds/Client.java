@@ -1,13 +1,16 @@
 package it.unitn.ds;
 
 import akka.actor.ActorRef;
+import akka.actor.Cancellable;
 import akka.actor.Props;
 import it.unitn.ds.TestTransaction.TestMsg;
 import it.unitn.ds.Transaction.TransactionId;
+import scala.concurrent.duration.Duration;
 
 import java.util.LinkedList;
 import java.util.Optional;
 import java.util.Queue;
+import java.util.concurrent.TimeUnit;
 
 public class Client extends AbstractClient implements DistributedActor{
 
@@ -54,6 +57,17 @@ public class Client extends AbstractClient implements DistributedActor{
     @Override
     public TransactionId getNextTransactionId() {
         return new TransactionId(this.getSelf(), transactionCounter++);
+    }
+
+    @Override
+    public Cancellable scheduleToItself(long delay, Msg msg) {
+        return getContext().system().scheduler().scheduleOnce(
+                Duration.create(delay, TimeUnit.MILLISECONDS),
+                getSelf(),
+                msg,
+                getContext().system().dispatcher(),
+                getSelf()
+        );
     }
 
     @Override
