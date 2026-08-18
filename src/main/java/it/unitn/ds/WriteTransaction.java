@@ -145,8 +145,8 @@ public class WriteTransaction extends Transaction {
                 this.timeout.cancel();
             }
             this.state = WriteTransactionState.DONE;
-        } else if(msg instanceof WriteTimeoutMsg) {
-            owner.getSelf().tell(new WriteTimeout(owner.getSelf(), this.destination, this.index, this.value), owner.getSelf());
+        } else if (msg instanceof WriteTimeoutMsg) {
+            client.callbackOnWriteTimeout(new WriteTimeout(owner.getSelf(), this.destination, this.index, this.value));
             owner.onTransactionComplete(this);
             this.state = WriteTransactionState.TIMEOUT;
         } else {
