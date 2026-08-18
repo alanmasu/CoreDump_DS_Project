@@ -4,21 +4,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 import akka.testkit.javadsl.TestKit;
 import it.unitn.ds.EpochPair;
 import it.unitn.ds.Msg;
 import it.unitn.ds.Transaction.TransactionId;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 /**
  * Regression tests for the methods overridden by {@link Msg}: equals, hashCode and toString.
  */
-public class TestMsgClass {
+class TestMsgClass {
 
     /** Minimal concrete message, used to exercise the abstract base class. */
     private static class SimpleMsg extends Msg {
@@ -48,7 +47,6 @@ public class TestMsgClass {
     @AfterAll
     static void tearDown() {
         TestKit.shutdownActorSystem(system);
-        system = null;
     }
 
     @Test
@@ -56,16 +54,31 @@ public class TestMsgClass {
         SimpleMsg msg = new SimpleMsg(new TransactionId(alice, 1), new EpochPair(0, 0), alice);
         SimpleMsg sameValue = new SimpleMsg(new TransactionId(alice, 1), new EpochPair(0, 0), alice);
 
-        assertEquals(msg, sameValue);
-        assertEquals(msg.hashCode(), sameValue.hashCode());
+        assertEquals(msg, sameValue, "messages with identical fields should be equal");
+        assertEquals(msg.hashCode(), sameValue.hashCode(), "equal messages must share a hashCode");
 
         // A difference on any field, or a different message class, breaks equality
-        assertNotEquals(msg, new SimpleMsg(new TransactionId(alice, 2), new EpochPair(0, 0), alice));
-        assertNotEquals(msg, new SimpleMsg(new TransactionId(bob, 1), new EpochPair(0, 0), alice));
-        assertNotEquals(msg, new SimpleMsg(new TransactionId(alice, 1), new EpochPair(1, 0), alice));
-        assertNotEquals(msg, new SimpleMsg(new TransactionId(alice, 1), new EpochPair(0, 0), bob));
-        assertNotEquals(msg, new OtherMsg(new TransactionId(alice, 1), new EpochPair(0, 0), alice));
-        assertNotEquals(msg, null);
+        assertNotEquals(
+                msg,
+                new SimpleMsg(new TransactionId(alice, 2), new EpochPair(0, 0), alice),
+                "a different transaction counter should break equality");
+        assertNotEquals(
+                msg,
+                new SimpleMsg(new TransactionId(bob, 1), new EpochPair(0, 0), alice),
+                "a different initiator should break equality");
+        assertNotEquals(
+                msg,
+                new SimpleMsg(new TransactionId(alice, 1), new EpochPair(1, 0), alice),
+                "a different epoch should break equality");
+        assertNotEquals(
+                msg,
+                new SimpleMsg(new TransactionId(alice, 1), new EpochPair(0, 0), bob),
+                "a different sender should break equality");
+        assertNotEquals(
+                msg,
+                new OtherMsg(new TransactionId(alice, 1), new EpochPair(0, 0), alice),
+                "a different message class should break equality");
+        assertNotEquals(msg, null, "a message should never equal null");
     }
 
     @Test
@@ -74,10 +87,13 @@ public class TestMsgClass {
         SimpleMsg bothNullTwin = new SimpleMsg(new TransactionId(alice, 1), null, null);
         SimpleMsg complete = new SimpleMsg(new TransactionId(alice, 1), new EpochPair(0, 0), alice);
 
-        assertEquals(bothNull, bothNullTwin);
-        assertEquals(bothNull.hashCode(), bothNullTwin.hashCode());
-        assertNotEquals(bothNull, complete);
-        assertNotEquals(complete, bothNull);
+        assertEquals(bothNull, bothNullTwin, "two messages with null epoch and sender should be equal");
+        assertEquals(
+                bothNull.hashCode(),
+                bothNullTwin.hashCode(),
+                "equal messages must share a hashCode even with null fields");
+        assertNotEquals(bothNull, complete, "null fields should not equal populated ones");
+        assertNotEquals(complete, bothNull, "equality must be symmetric with null fields");
     }
 
     @Test

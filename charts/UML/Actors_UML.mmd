@@ -18,14 +18,17 @@ classDiagram
     %% getters/setters and logging helpers are omitted from every box.
     %% Map~K→V~ is read as Map<K, V> (Mermaid generics cannot contain a comma).
     %%
-    %% SCOPE: only the actor types. Transaction and Msg appear in signatures but
-    %% have no box here - see Transactions_UML.mmd and Messages_UML.mmd.
+    %% SCOPE: only the actor types. Transaction, TransactionId and Msg appear in
+    %% signatures but have no box here - see TransactionBase_UML.mmd and
+    %% Messages_UML.mmd.
+    %% NOTE: Replica keeps a list of concurrently active transactions, while
+    %% Client runs one at a time and queues the rest.
     %% Infrastructure and test plumbing (NetworkChannel, Logger, Main, Props,
     %% InitSystem, Crash/CrashType/CrashStatus and the listener notification
     %% messages) are deliberately omitted.
     %% ==================================================================
 
-    namespace actors {
+    %% namespace actors {
 
         class AbstractActor {
             <<akka.actor>>
@@ -34,8 +37,10 @@ classDiagram
         class DistributedActor {
             <<interface>>
             +ActorRef getSelf()
+            +void scheduleTransaction(Transaction transaction)
             +void onTransactionComplete(Transaction transaction)
-            +void onMessage(Msg msg)
+            +void unicast(Msg msg, ActorRef target)
+            +TransactionId getNextTransactionId()
         }
 
         class AbstractReplica {
@@ -51,6 +56,7 @@ classDiagram
         class Replica {
             -Map~Integer→ActorRef~ groupOfReplicas
             -LinkedList~Transaction~ activeTransactions
+            -int transactionCounter
             ~int[] positions
             ~int coordinatorID
             +void broadcast(Msg msg, boolean includeSelf)
@@ -59,7 +65,9 @@ classDiagram
             +void initSystem(InitSystem sysInit)
             +int getSystemNumberOfActors()
             +void crash(Crash how_to_crash)
+            +void scheduleTransaction(Transaction transaction)
             +void onTransactionComplete(Transaction transaction)
+            +TransactionId getNextTransactionId()
             +Receive createReceive()
             +void onMessage(Msg msg)
         }
@@ -75,19 +83,23 @@ classDiagram
         }
 
         class Client {
-            ~LinkedList~Transaction~ activeTransactions
+            -int transactionCounter
+            ~Queue~Transaction~ scheduledTransactions
+            ~Transaction currentTransaction
+            +void unicast(Msg msg, ActorRef target)
             +void sendRead(ActorRef replica, int index)
             +void sendWrite(ActorRef replica, int index, int value)
-            +Receive createReceive()
+            +void scheduleTransaction(Transaction transaction)
             +void onTransactionComplete(Transaction transaction)
+            +TransactionId getNextTransactionId()
+            +Receive createReceive()
             +void onMessage(Msg msg)
         }
-    }
+    %% }
 
-    AbstractReplica --|> AbstractActor
-    AbstractClient --|> AbstractActor
     Replica --|> AbstractReplica
     Client --|> AbstractClient
-    %% both concrete actors expose the callbacks the transactions call back into
     Replica ..|> DistributedActor
     Client ..|> DistributedActor
+    AbstractReplica --|> AbstractActor
+    AbstractClient --|> AbstractActor

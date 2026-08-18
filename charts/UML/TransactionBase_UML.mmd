@@ -27,7 +27,7 @@ classDiagram
     %% methods that the overview diagrams omit. DistributedActor, Cancellable and
     %% ActorRef are shown only as endpoints, without their own members - see
     %% Actors_UML.mmd. The message hierarchy is in Messages_UML.mmd; only Msg and
-    %% TestMsg appear here, because the transactions consume them directly.
+    %% ProbeMsg appear here, because the transactions consume them directly.
     %% ==================================================================
 
     %% ------------------------------------------------------------------
@@ -35,16 +35,22 @@ classDiagram
     %% ------------------------------------------------------------------
     class Transaction {
         <<abstract>>
-        +Cancellable timeout
-        +DistributedActor owner
-        +EpochPair epochPair
-        +TransactionId id
-        +List~Msg~ history
-        +Transaction(int id, DistributedActor owner)
+        #Cancellable timeout
+        #final DistributedActor owner
+        #final EpochPair startEpochPair
+        -final TransactionId id
+        #final List~Msg~ history
+        +Transaction(TransactionId id, DistributedActor owner, EpochPair startEpochPair)
+        +TransactionId getId()
         +int compareTo(Transaction other)
         +String toString()
         +String getState()*
         +void computeState(Msg msg)*
+        +void start()*
+    }
+
+    class StartParameters {
+        <<interface>>
     }
 
     %% ------------------------------------------------------------------
@@ -108,8 +114,8 @@ classDiagram
     %% ==================================================================
     %% REALIZATION - "implements"
     %% ==================================================================
-    %% Transaction implements Comparable<Transaction>: orders by epochPair,
-    %% a null epochPair sorting before any real one
+    %% Transaction implements Comparable<Transaction>: orders by startEpochPair,
+    %% a null startEpochPair sorting before any real one
     Transaction ..|> Comparable
     %% EpochPair implements Comparable<EpochPair>: epoch first, then sequence
     EpochPair ..|> Comparable
@@ -119,18 +125,22 @@ classDiagram
     Msg ..|> Serializable
 
     %% ==================================================================
-    %% COMPOSITION - the whole creates the part and the part dies with it
+    %% NESTING - StartParameters is declared inside Transaction
     %% ==================================================================
-    %% the id is built inside the Transaction constructor from owner.getSelf()
-    Transaction "1" *-- "1" TransactionId : id
-    %% every message is stamped with the id of the transaction it belongs to
-    Msg "1" *-- "1" TransactionId : transactionId
+    %% each concrete transaction defines its own implementation, holding
+    %% whatever start() needs to fire the first message
+    Transaction "1" *-- "0..1" StartParameters : nested type
 
     %% ==================================================================
     %% AGGREGATION - the part is supplied from outside / shared
     %% ==================================================================
-    %% epochPair is null at construction, assigned later by the coordinator flow
-    Transaction "1" o-- "0..1" EpochPair : epochPair
+    %% the id is no longer built by the transaction: the actor obtains it from
+    %% getNextTransactionId() (or reuses the id carried by the incoming Msg) and
+    %% passes it to the constructor, so the same instance is shared with the Msg
+    Transaction "1" o-- "1" TransactionId : id
+    Msg "1" o-- "1" TransactionId : transactionId
+    %% startEpochPair is passed in at construction and may be null
+    Transaction "1" o-- "0..1" EpochPair : startEpochPair
     Msg "1" o-- "0..1" EpochPair : epochPair
     %% the transaction keeps the messages it has processed, but they are shared
     %% with the network and with the other endpoint of the exchange
@@ -152,5 +162,6 @@ classDiagram
     Transaction ..> Msg : computeState(msg)
     %% compareTo() delegates the ordering to EpochPair.compareTo()
     Transaction ..> EpochPair : compareTo delegates
-    %% the test transaction answers "start" with "ack" and "ack" with "done"
-    %% on "done" the transaction removes itself from the actor's active list
+    %% start() fires the first message of the exchange through the owning actor,
+    %% and the subclass signals completion via owner.onTransactionComplete(this)
+    Transaction ..> DistributedActor : start() / onTransactionComplete(this)
