@@ -113,7 +113,7 @@ public class WriteTransaction extends Transaction {
             Client client = (Client) this.owner;
             client.unicast(startParameters.initialMsg, startParameters.targetActor);
             state = WriteTransactionState.WAITING_RESULT;
-            client.getContext().system().scheduler().scheduleOnce(
+            this.timeout = client.getContext().system().scheduler().scheduleOnce(
                Duration.create(client.getWriteTimeoutDelay(), TimeUnit.MILLISECONDS), 
                client.getSelf(), 
                new WriteTimeoutMsg(this.getId(), null, client.getSelf()), 
@@ -141,6 +141,9 @@ public class WriteTransaction extends Transaction {
             WriteResult res = new WriteResult(true, writeResultMsg.index, writeResultMsg.value, writeResultMsg.replicaId);
             client.callbackOnWriteResult(res);
             owner.onTransactionComplete(this);
+            if(this.timeout != null) {
+                this.timeout.cancel();
+            }
             this.state = WriteTransactionState.DONE;
         } else if(msg instanceof WriteTimeoutMsg) {
             owner.getSelf().tell(new WriteTimeout(owner.getSelf(), this.destination, this.index, this.value), owner.getSelf());
