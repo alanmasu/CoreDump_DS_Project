@@ -6,7 +6,7 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
-public abstract class Transaction implements Comparable<Transaction> {
+public abstract class Transaction {
 
     protected Cancellable timeout;
     protected final DistributedActor owner;
@@ -66,19 +66,6 @@ public abstract class Transaction implements Comparable<Transaction> {
 
     public TransactionId getId() {
         return id;
-    }
-
-    @Override
-    public int compareTo(Transaction other) {
-        if (this.epochPair == null && other.epochPair == null) {
-            return 0;
-        } else if (this.epochPair == null) {
-            return -1;
-        } else if (other.epochPair == null) {
-            return 1;
-        } else {
-            return this.epochPair.compareTo(other.epochPair);
-        }
     }
 
     @Override
