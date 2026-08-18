@@ -13,8 +13,8 @@ public class Client extends AbstractClient implements DistributedActor{
 
     private int transactionCounter;
 
-    Queue<Transaction> scheduledTransactions;
-    Transaction currentTransaction;
+    private Queue<Transaction> scheduledTransactions;
+    private Transaction currentTransaction;
     
     Client(long readTimeoutDelay, long writeTimeoutDelay, Optional<ActorRef> defaultTargetReplica, Optional<ActorRef> listener) {
         super(readTimeoutDelay, writeTimeoutDelay, listener, defaultTargetReplica);
