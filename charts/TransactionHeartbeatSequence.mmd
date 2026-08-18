@@ -12,12 +12,19 @@ sequenceDiagram
 
     %% S is the ActorSystem scheduler. C is the current coordinator actor and F
     %% is one representative follower. A real broadcast targets every follower.
+    participant M as Main
     participant S@{ "type" : "database", "alias": "Akka Scheduler" }
 
     participant C as Coordinator Replica
     participant F as Follower Replica
 
-    %% Master and InitSystem are intentionally outside this diagram's scope.
+    %% Main sends the same initialization message to every replica. C and F
+    %% represent the coordinator and one follower from that replica group.
+    M ->> C: InitSystem(group, coordinator_id)
+    M ->> F: InitSystem(group, coordinator_id)
+    C ->> C: Create and schedule local HeartbeatTransaction
+    F ->> F: Create and schedule local HeartbeatTransaction
+
     %% Heartbeat timers start only after each Replica has processed InitSystem
     %% and knows both the group membership and current coordinator ID.
     Note over C,F: All replicas have processed InitSystem
