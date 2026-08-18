@@ -17,15 +17,14 @@ public class WriteTransaction extends Transaction {
     protected ActorRef destination;
 
 
-    public WriteTransaction(TransactionId id, DistributedActor owner, EpochPair epochPair, int index, int value, ActorRef targetActor) {
-        super(id, owner);
+    public WriteTransaction(TransactionId id, DistributedActor owner, EpochPair startEpochPair, int index, int value, ActorRef targetActor) {
+        super(id, owner, startEpochPair);
         this.state = WriteTransactionState.INIT;
         this.startParameters = new WriteTransactionStartParameters();
-        this.epochPair = epochPair;
         this.index = index;
         this.value = value;
         this.destination = targetActor;
-        startParameters.initialMsg = new WriteMsg(id, epochPair, owner.getSelf(), index, value);
+        startParameters.initialMsg = new WriteMsg(id, startEpochPair, owner.getSelf(), index, value);
         startParameters.targetActor = targetActor;
     }
 
@@ -117,18 +116,18 @@ public class WriteTransaction extends Transaction {
             client.getContext().system().scheduler().scheduleOnce(
                Duration.create(client.getWriteTimeoutDelay(), TimeUnit.MILLISECONDS), 
                client.getSelf(), 
-               new WriteTimeoutMsg(this.getId(), epochPair, client.getSelf()), 
+               new WriteTimeoutMsg(this.getId(), null, client.getSelf()), 
                client.getContext().system().dispatcher(),
                client.getSelf()
             );
-
-        }else if(this.owner instanceof Replica) {
-            // // TODO: Create a new UpdateTransaction for the replica to handle the update
-            // Replica replica = (Replica) this.owner;
-            // this.state = WriteTransactionState.WAITING_UPDATE;
-            // ((Replica)this.owner).scheduleTransaction(new UpdateTransaction(owner.getNextTransactionId(), owner, this.getId(), this.index, this.value));
         }
-            
+        // // TODO: Create a new UpdateTransaction for the replica to handle the update
+        // else if(this.owner instanceof Replica) {
+        //     // Replica replica = (Replica) this.owner;
+        //     // this.state = WriteTransactionState.WAITING_UPDATE;
+        //     // Transaction transaction = new UpdateTransaction(replica.getNextTransactionId(), replica, this.startEpochPair, this.index, this.value, this.destination);
+        //     // replica.scheduleTransaction(transaction);
+        // }
 
     }    
     ////////////////////////////////////////////
@@ -155,7 +154,7 @@ public class WriteTransaction extends Transaction {
     void replicaStateMachine(Msg msg) {
         Replica replica = (Replica) this.owner;
         if(msg instanceof WriteFinishMsg) {
-            WriteResultMsg writeResultMsg = new WriteResultMsg(this.getId(), this.epochPair, owner.getSelf(), this.index, this.value, replica.getId());
+            WriteResultMsg writeResultMsg = new WriteResultMsg(this.getId(), this.startEpochPair, owner.getSelf(), this.index, this.value, replica.getId());
             replica.unicast(writeResultMsg, this.destination);
             replica.onTransactionComplete(this);
             this.state = WriteTransactionState.DONE;    
