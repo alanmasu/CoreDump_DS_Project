@@ -1,0 +1,206 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Clear analysis problems",
+            "detail": "Removes PMD/SpotBugs, CPD and test markers from the editor and the Problems panel",
+            "type": "shell",
+            "command": "echo",
+            "args": [
+                "Problems cleared."
+            ],
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared",
+                "clear": true
+            },
+            "problemMatcher": [
+                {
+                    "owner": "java-static-analysis",
+                    "source": "PMD/SpotBugs",
+                    "fileLocation": "absolute",
+                    "severity": "info",
+                    "pattern": {
+                        "regexp": "^__never__(.*):(\\d+):(.*)$",
+                        "file": 1,
+                        "line": 2,
+                        "message": 3
+                    }
+                },
+                {
+                    "owner": "java-cpd",
+                    "source": "CPD",
+                    "fileLocation": "absolute",
+                    "severity": "info",
+                    "pattern": {
+                        "regexp": "^__never__(.*):(\\d+):(.*)$",
+                        "file": 1,
+                        "line": 2,
+                        "message": 3
+                    }
+                },
+                {
+                    "owner": "java-tests",
+                    "source": "gradle-test",
+                    "fileLocation": "absolute",
+                    "severity": "info",
+                    "pattern": {
+                        "regexp": "^__never__(.*):(\\d+):(.*)$",
+                        "file": 1,
+                        "line": 2,
+                        "message": 3
+                    }
+                }
+            ]
+        },
+        {
+            "label": "Duplicated code (CPD)",
+            "detail": "Runs ./gradlew cpd; each end of a duplication becomes a hint in the editor",
+            "type": "shell",
+            "command": "./gradlew",
+            "args": [
+                "cpd"
+            ],
+            "group": "test",
+            "presentation": {
+                "reveal": "silent",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": {
+                "owner": "java-cpd",
+                "source": "CPD",
+                "fileLocation": "absolute",
+                "severity": "info",
+                "pattern": {
+                    "regexp": "^(.*\\.java):(\\d+):\\s+(CPD):\\s+(.*)$",
+                    "file": 1,
+                    "line": 2,
+                    "code": 3,
+                    "message": 4
+                }
+            }
+        },
+        {
+            "label": "Static analysis (PMD + SpotBugs)",
+            "detail": "Runs ./gradlew staticAnalysis; findings appear as squiggles in the editor",
+            "type": "shell",
+            "command": "./gradlew",
+            "args": [
+                "staticAnalysis"
+            ],
+            "group": "test",
+            "presentation": {
+                "reveal": "silent",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": {
+                "owner": "java-static-analysis",
+                "source": "PMD/SpotBugs",
+                "fileLocation": "absolute",
+                "severity": "warning",
+                "pattern": {
+                    "regexp": "^(.*\\.java):(\\d+):\\s+(\\S+):\\s+(.*)$",
+                    "file": 1,
+                    "line": 2,
+                    "code": 3,
+                    "message": 4
+                }
+            }
+        },
+        {
+            "label": "Static analysis (watch)",
+            "detail": "Re-runs the analysis on every save and keeps the squiggles current",
+            "type": "shell",
+            "command": "./gradlew",
+            "args": [
+                "--continuous",
+                "--console=plain",
+                "staticAnalysis"
+            ],
+            "isBackground": true,
+            "presentation": {
+                "reveal": "silent",
+                "panel": "dedicated"
+            },
+            "problemMatcher": {
+                "owner": "java-static-analysis",
+                "source": "PMD/SpotBugs",
+                "fileLocation": "absolute",
+                "severity": "warning",
+                "pattern": {
+                    "regexp": "^(.*\\.java):(\\d+):\\s+(\\S+):\\s+(.*)$",
+                    "file": 1,
+                    "line": 2,
+                    "code": 3,
+                    "message": 4
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "^=== analysis: begin ===$",
+                    "endsPattern": "^=== analysis: end ===$"
+                }
+            }
+        },
+        {
+            "label": "Run tests",
+            "detail": "Runs ./gradlew test; failures appear on the failing assertion line",
+            "type": "shell",
+            "command": "./gradlew",
+            "args": [
+                "test"
+            ],
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": {
+                "owner": "java-tests",
+                "source": "gradle-test",
+                "fileLocation": "absolute",
+                "severity": "error",
+                "pattern": {
+                    "regexp": "^(.*\\.java):(\\d+):\\s+(\\S+):\\s+(.*)$",
+                    "file": 1,
+                    "line": 2,
+                    "code": 3,
+                    "message": 4
+                }
+            }
+        },
+        {
+            "label": "Run regression tests",
+            "detail": "Runs ./gradlew regression; failures appear on the failing assertion line",
+            "type": "shell",
+            "command": "./gradlew",
+            "args": [
+                "regression"
+            ],
+            "group": "test",
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": {
+                "owner": "java-tests",
+                "source": "gradle-test",
+                "fileLocation": "absolute",
+                "severity": "error",
+                "pattern": {
+                    "regexp": "^(.*\\.java):(\\d+):\\s+(\\S+):\\s+(.*)$",
+                    "file": 1,
+                    "line": 2,
+                    "code": 3,
+                    "message": 4
+                }
+            }
+        }
+    ]
+}

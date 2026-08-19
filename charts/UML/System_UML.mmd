@@ -120,14 +120,14 @@ classDiagram
             +void computeState(Msg msg)*
         }
 
-        class TestTransaction {
-            +TestTransaction(int id, DistributedActor owner)
+        class ProbeTransaction {
+            +ProbeTransaction(int id, DistributedActor owner)
             +String getState()
             +void computeState(Msg msg)
         }
     }
 
-    TestTransaction --|> Transaction
+    ProbeTransaction --|> Transaction
 
     %% ------------------------------------------------------------------
     %% 3. MESSAGE HIERARCHY
@@ -144,18 +144,18 @@ classDiagram
             +Msg(TransactionId tId, EpochPair epochPair, ActorRef sender)
         }
 
-        class TestMsg {
-            <<TestTransaction>>
+        class ProbeMsg {
+            <<ProbeTransaction>>
             +String content
         }
     }
 
-    TestMsg --|> Msg
+    ProbeMsg --|> Msg
     
 
     %% Transaction has an history of the Msg 
     Transaction --> "0..*" Msg : history
-    TestTransaction ..> TestMsg 
+    ProbeTransaction ..> ProbeMsg 
 
     %% Replica is associated with the Transaction in the sense that it holds a LinkedList of active Transactions os if the Replica dies, the Transactions die with it. 
     Replica *-- "0..*" Transaction : activeTransactions

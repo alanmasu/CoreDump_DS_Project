@@ -1,11 +1,10 @@
 package it.unitn.ds;
 
-import java.util.HashMap;
-import java.util.Map;
-
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
 import it.unitn.ds.AbstractReplica.InitSystem;
+import java.util.HashMap;
+import java.util.Map;
 
 public class Main {
 
@@ -23,12 +22,15 @@ public class Main {
 
         Map<Integer, ActorRef> replicas = new HashMap<>(N_REPLICAS);
         for (int i = 0; i < N_REPLICAS; i++) {
-            replicas.put(i,
-                system.actorOf(
-                    Replica.props(i, AbstractReplica.MIN_LATENCY, AbstractReplica.MAX_LATENCY, AbstractReplica.COORDINATOR_BEAT_INTERVAL),
-                    "Replica_" + i
-                )
-            );
+            replicas.put(
+                    i,
+                    system.actorOf(
+                            Replica.props(
+                                    i,
+                                    AbstractReplica.MIN_LATENCY,
+                                    AbstractReplica.MAX_LATENCY,
+                                    AbstractReplica.COORDINATOR_BEAT_INTERVAL),
+                            "Replica_" + i));
         }
 
         InitSystem initMsg = new InitSystem(replicas, COORDINATOR_ID);
@@ -37,7 +39,7 @@ public class Main {
         }
 
         // TODO: Create your clients
-        
+
         // TODO: Implement your main logic
 
         system.terminate();
@@ -46,6 +48,4 @@ public class Main {
         System.out.println("END");
         System.out.println("========================================\n");
     }
-
-
 }
