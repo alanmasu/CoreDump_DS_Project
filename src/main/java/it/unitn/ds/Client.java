@@ -54,7 +54,8 @@ public class Client extends AbstractClient implements DistributedActor {
 
     @Override
     public void sendRead(ActorRef replica, int index) {
-        ReadTransaction transaction = new ReadTransaction(getNextTransactionId(), this, index, replica);
+        // TODO: Add the correct startEpochPair to the ReadTransaction constructor
+        ReadTransaction transaction = new ReadTransaction(getNextTransactionId(), this, null, index, replica);
         scheduleTransaction(transaction);
     }
 

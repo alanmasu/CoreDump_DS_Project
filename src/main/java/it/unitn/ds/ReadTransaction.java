@@ -13,8 +13,8 @@ public class ReadTransaction extends Transaction {
     protected final Client client;
 
 
-    public ReadTransaction(TransactionId id, Client owner, int index, ActorRef destination) {
-        super(id, owner);
+    public ReadTransaction(TransactionId id, Client owner, EpochPair startEpocPair, int index, ActorRef destination) {
+        super(id, owner, startEpocPair);
         this.index = index;
         this.destination = destination;
         this.state = ReadTransactionState.INIT;
@@ -66,13 +66,13 @@ public class ReadTransaction extends Transaction {
         if (state != ReadTransactionState.INIT) {
             throw new IllegalStateException("Cannot start a transaction that is not in INIT state.");
         }
-        ReadMsg readMsg = new ReadMsg(owner.getNextTransactionId(), null, owner.getSelf(), index);
+        ReadMsg readMsg = new ReadMsg(this.getId(), null, owner.getSelf(), index);
         owner.unicast(readMsg, destination);
         state = ReadTransactionState.WAITING_RESULT;
         this.timeout = client.getContext().system().scheduler().scheduleOnce(
                 Duration.create(((Client) owner).getReadTimeoutDelay(), TimeUnit.MILLISECONDS),
                 client.getSelf(),
-                new ReadTimeoutMsg(owner.getNextTransactionId(), null, owner.getSelf()),
+                new ReadTimeoutMsg(this.getId(), null, owner.getSelf()),
                 client.getContext().system().dispatcher(),
                 client.getSelf()
         );
@@ -83,15 +83,17 @@ public class ReadTransaction extends Transaction {
         if (msg instanceof ReadResultMsg) {
             ReadResultMsg readResultMsg = (ReadResultMsg) msg;
             state = ReadTransactionState.DONE;
-            this.timeout.cancel();
+            if (this.timeout != null){
+                this.timeout.cancel();
+            }
             client.callbackOnReadResult(new AbstractClient.ReadResult(true, this.index, readResultMsg.value, readResultMsg.replicaId));
             owner.onTransactionComplete(this);
         } else if (msg instanceof ReadTimeoutMsg) {
             state = ReadTransactionState.TIMEOUT;
             client.callbackOnReadTimeout(new AbstractClient.ReadTimeout(owner.getSelf(), this.destination, this.index));
             owner.onTransactionComplete(this);
+        } else {
+            throw new IllegalArgumentException("Unexpected message type: " + msg.getClass().getName() + " in transaction " + this.getId());
         }
     }
-            
-
 }

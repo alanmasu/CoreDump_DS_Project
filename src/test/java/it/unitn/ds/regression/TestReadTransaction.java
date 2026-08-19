@@ -1,5 +1,6 @@
 package it.unitn.ds.regression;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Optional;
@@ -13,6 +14,7 @@ import akka.actor.ActorSystem;
 import akka.testkit.javadsl.TestKit;
 import it.unitn.ds.AbstractClient.ReadRequest;
 import it.unitn.ds.AbstractClient.ReadResult;
+import it.unitn.ds.AbstractClient.ReadTimeout;
 import it.unitn.ds.Client;
 import it.unitn.ds.Logger;
 import it.unitn.ds.Replica;
@@ -53,7 +55,10 @@ class TestReadTransaction {
         client.tell(readRequest, probeReplica.getRef());
 
         // Expecting a timeout message since the read timeout is set to 100ms
-        probe.expectMsgClass(Duration.ofMillis(205), it.unitn.ds.AbstractClient.ReadTimeout.class);
+        ReadTimeout readTimeout = probe.expectMsgClass(Duration.ofMillis(205), ReadTimeout.class);
+        assertEquals(0, readTimeout.index, "Read transaction should timeout for index 0");
+        assertEquals(probeReplica.getRef(), readTimeout.replica, "Read transaction should timeout for the correct replica");
+        assertEquals(client, readTimeout.client, "Read transaction should timeout for the correct client");
     }
     
 }
