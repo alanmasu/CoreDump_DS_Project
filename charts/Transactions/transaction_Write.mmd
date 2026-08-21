@@ -3,43 +3,54 @@ config:
   theme: forest
 ---
 sequenceDiagram
-    participant M as Master
+    participant M @{ "type" : "database", alias : "Master" }
 
     actor C1 as Client1
     %% actor C2 as Client2
-    participant R1 as Replica1(coordinator)
-    participant R2 as Replica2
-    participant R3 as Replica3
+    participant R1 @{ alias : "Replica 1 (coordinator)" }
+    participant R2 @{ alias : "Replica 2" }
+    participant R3 @{ alias : "Replica 3" }
 
     rect rgba(0, 255, 0, 0.3)
         note over M, R3: Client sends a write request to Replica2 which is not the coordinator
         M ->> C1: WriteRequest(idx, val)
-        note over C1: Transaction WRITE init on C1
-        C1 ->> R2: WriteMsg(idx, val, Client1)
-        note over R2: Transaction UPDATE init on R2
-        note over R2: Timeout for UPDATE Msg
-        R2 ->>+ R1: WriteMsg(idx, val, Client1)
-        note over R1: Transaction UPDATE init on R1
-        %%%%%%%% Maybe this could be removed %%%%%%%%
-        %% R1 ->> R1: UpdateMsg(idx, val)
-        note over R1: R1 counts itself as an ACK
-        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        R1 ->> R2: UpdateMsg(<2,4>, idx, val)
-        note over R2: Transaction on R2 waits the WRITEOK Msg
-        R1 ->> R3: UpdateMsg(<2,4>, idx, val)  
-        note over R3: Transaction UPDATE init on R3
-        note over R3: Timeout for WRITEOK Msg
-        R3 ->> R1: UpdateAck(<2,4>)
-        note over R1: Quorum reached on R1
-        R1 ->> R3: WriteOk(<2,4>)
-        R1 ->>- R2: WriteOk(<2,4>)
-        note over R3: Transaction UPDATE completed on R3
-        R2 ->> R1: UpdateAck(<2,4>)
-        note over R1, R2: Transaction UPDATE completed on R2 and R1
+        note over C1: C1 Start a WriteTransaction<C1, 0>
+        C1 ->> R2: WriteMsg(idx, val, Client1, <C1, 0>)
+        note over R2: R2 Start a WriteTransaction<C1, 0> 
+        rect rgb(243, 241, 111)
+            note over R2: R2 Start a UpdateTransaction<R2, 0>
+            note over R2: R2 Schedule a UpdateTimeoutMsg<R2, 0> for itself
+            R2 ->>+ R1: WriteMsg(idx, val, Client1, <R2, 0>)
+            note over R1: R1 as coordinator has <e,i> = <2,4>
+            note over R1: Start a UpdateTransaction<R2, 0> on R1
+            par
+                R1 ->> R1: UpdateMsg(idx, val, <2,4>, <R2, 0>)
+                R1 ->> R2: UpdateMsg(idx, val, <2,4>, <R2, 0>)
+                R1 ->> R3: UpdateMsg(idx, val, <2,4>, <R2, 0>) 
+            end 
+            note over R1: R1 counts itself as an ACK
+            note over R2: R2 Schedules a WriteOkTimeoutMsg<R2, 0> for itself
+            note over R3: R3 Start a UpdateTransaction<R2, 0>
+            note over R3: R3 Schedules a WriteOkTimeoutMsg<R2, 0> for itself
+            R3 ->> R1: UpdateAck(<2,4>, <R2, 0>)
+            note over R1: Quorum reached
+            note over R1: R1 updates <e,i> = <2,5>
+            par
+                R1 ->> R2: WriteOk(<2,5>, <R2, 0>)
+                note over R2: R2 updates <e,i> = <2,5>
+                R1 ->>- R3: WriteOk(<2,5>, <R2, 0>)
+                note over R3: R3 updates <e,i> = <2,5>
+            end
+            note over R1, R3: Transaction <R2, 0> completed on all replicas
 
-        R2 ->> C1: WriteResult(idx, val)
-        note over C1: Transaction WRITE completed on C1
+            R2 ->> R1: UpdateAck(<2,4>, <R2, 0>) was delayed here
+
+            R2 ->> R2: WriteFinishMsg(idx, val, <2,5>, <C1, 0>)
+        end
+        note over R2: Transaction <C1, 0> completed
+
+        R2 ->> C1: WriteResultMsg(idx, val, 2, <2,5>, <C1, 0>)
+        C1 ->> C1: WriteResult(true, idx, val, 2)
+        note over C1: Transaction <C1, 0> completed
+        
     end
-    
-
-
