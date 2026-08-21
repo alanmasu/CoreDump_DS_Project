@@ -57,7 +57,8 @@ public class Client extends AbstractClient implements DistributedActor {
 
     @Override
     public void sendWrite(ActorRef replica, int index, int value) {
-        // TODO: implement
+        WriteTransaction transaction = new WriteTransaction(this.getNextTransactionId(), this, null, index, value, replica);
+        scheduleTransaction(transaction);
     }
 
     @Override
@@ -70,6 +71,9 @@ public class Client extends AbstractClient implements DistributedActor {
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
+                .match(WriteTransaction.WriteTimeoutMsg.class, this::onMessage)
+                .match(WriteTransaction.WriteResultMsg.class, this::onMessage)
+                // Handle TestMsg messages, leave it as last
                 .match(ProbeMsg.class, this::onProbeMsg)
                 .build();
     }

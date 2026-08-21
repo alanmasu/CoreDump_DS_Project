@@ -4,6 +4,8 @@ import akka.actor.ActorRef;
 import akka.actor.Props;
 import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.Transaction.TransactionId;
+import it.unitn.ds.WriteTransaction.WriteFinishMsg;
+import it.unitn.ds.WriteTransaction.WriteMsg;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -242,8 +244,12 @@ public class Replica extends AbstractReplica implements DistributedActor {
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
             .match(
-                ProbeMsg.class,
-                this::onProbeMsg
+                WriteMsg.class, 
+                this::onWriteMsg
+            )
+            .match(
+                WriteFinishMsg.class, 
+                this::onMessage
             )
             .match(
                 HeartbeatTransaction.HeartbeatTickMsg.class,
@@ -257,6 +263,11 @@ public class Replica extends AbstractReplica implements DistributedActor {
                 HeartbeatTransaction.WatchdogExpiredMsg.class,
                 this::onWatchdogExpired
             )
+            // Handle TestMsg messages, leave it as last
+            .match(
+                ProbeMsg.class,
+                this::onProbeMsg
+            )
             .build();
     }
 
@@ -265,6 +276,9 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * @param msg Incoming message to be processed by the appropriate Transaction.
      */
     public void onMessage(Msg msg) {
+        if(this.replicaStatus == CrashStatus.CRASHED){
+            return;
+        }
         for (Transaction transaction : activeTransactions) {
             if (transaction.getId().equals(msg.transactionId)) {
                 transaction.computeState(msg);
@@ -272,6 +286,13 @@ public class Replica extends AbstractReplica implements DistributedActor {
             }
         }
     }
+    
+    public void onWriteMsg(WriteMsg msg) {
+        // TODO: when the method will be implemented, change the null with the current EpochPair of the replica
+        WriteTransaction transaction = new WriteTransaction(msg.transactionId, this, null, msg.index, msg.value, msg.sender);
+        scheduleTransaction(transaction);
+    }
+        
 
     /// For testing
     public void onProbeMsg(ProbeMsg msg) {
