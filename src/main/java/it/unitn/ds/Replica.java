@@ -12,7 +12,8 @@ import java.util.Map;
 import java.util.Optional;
 
 public class Replica extends AbstractReplica implements DistributedActor {
-
+   
+    private static final int INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE = 0;
     private Map<Integer, ActorRef> groupOfReplicas;
     private List<Transaction> activeTransactions;
     private int transactionCounter;
@@ -20,7 +21,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     private int positions[];
     int coordinatorID;
 
-    ///////////// For chashing ////////////
+    ///////////// For crashing ////////////
     private enum CrashStatus {
         NONE,
         PENDING,
@@ -31,6 +32,9 @@ public class Replica extends AbstractReplica implements DistributedActor {
     private int crashCount;
     private AbstractReplica.Crash pendingCrash;
     ////////////////////////////////////////////
+ 
+    // Manages heartbeat sending or coordinator monitoring for this Replica
+    private HeartbeatTransaction heartbeatTransaction;
 
     public Replica(int id) {
         this(
@@ -139,6 +143,27 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.coordinatorID = sysInit.coordinator_id;
         log("Initialized with group of replicas: " + getSystemNumberOfActors() + " replicas, coordinator ID: "
                 + coordinatorID);
+
+        // All replicas will use the coordinator-created identity for this heartbeat term.
+        ActorRef coordinator = groupOfReplicas.get(coordinatorID);
+        if (coordinator == null) {
+            throw new IllegalStateException(
+                "Cannot initialize heartbeat: coordinator is not in the replica group."
+            );
+        }
+
+        TransactionId heartbeatTransactionId = new TransactionId(
+            coordinator,
+            INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE
+        );
+
+        this.heartbeatTransaction = new HeartbeatTransaction(
+            heartbeatTransactionId,
+            this,
+            null
+        );
+
+        scheduleTransaction(this.heartbeatTransaction);
     }
 
     @Override
@@ -171,6 +196,43 @@ public class Replica extends AbstractReplica implements DistributedActor {
         debug("Transaction completed: " + transaction.getId());
     }
 
+    /**
+     * Processes a coordinator's internal scheduled tick.
+     */
+    private void onHeartbeatTick(HeartbeatTransaction.HeartbeatTickMsg tick) {
+        if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
+            return;
+        }
+
+        onMessage(tick);
+
+        updateCrashStatusCallback(AbstractReplica.Crash.Type.Heartbeat);
+    }
+
+    /**
+     * Process a network heartbeat received by a follower.
+     */
+    private void onHeartbeat(HeartbeatTransaction.HeartbeatMsg heartbeat) {
+        if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
+            return;
+        }
+
+        onMessage(heartbeat);
+
+        updateCrashStatusCallback(AbstractReplica.Crash.Type.Heartbeat);
+    }
+
+    /**
+     * Processes the follower's internal watchdog event.
+     */
+    private void onWatchdogExpired(HeartbeatTransaction.WatchdogExpiredMsg expired) {
+        if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
+            return;
+        }
+
+        onMessage(expired);
+    }
+
     @Override
     public TransactionId getNextTransactionId() {
         TransactionId id = new TransactionId(this.getSelf(), transactionCounter);
@@ -181,11 +243,32 @@ public class Replica extends AbstractReplica implements DistributedActor {
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
-                .match(WriteMsg.class, this::onWriteMsg)
-                .match(WriteFinishMsg.class, this::onMessage)
-                // Handle TestMsg messages, leave it as last
-                .match(ProbeMsg.class, this::onProbeMsg)
-                .build();
+            .match(
+                WriteMsg.class, 
+                this::onWriteMsg
+            )
+            .match(
+                WriteFinishMsg.class, 
+                this::onMessage
+            )
+            .match(
+                HeartbeatTransaction.HeartbeatTickMsg.class,
+                this::onHeartbeatTick
+            )
+            .match(
+                HeartbeatTransaction.HeartbeatMsg.class,
+                this::onHeartbeat
+            )
+            .match(
+                HeartbeatTransaction.WatchdogExpiredMsg.class,
+                this::onWatchdogExpired
+            )
+            // Handle TestMsg messages, leave it as last
+            .match(
+                ProbeMsg.class,
+                this::onProbeMsg
+            )
+            .build();
     }
 
     /**
