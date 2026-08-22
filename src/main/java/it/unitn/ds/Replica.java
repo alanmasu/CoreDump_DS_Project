@@ -177,6 +177,22 @@ public class Replica extends AbstractReplica implements DistributedActor {
         return id;
     }
 
+    /**
+     * Returns the coordinator ID of the replica.
+     * @return The coordinator ID of the replica.
+     */
+    public int getCoordinatorID() {
+        return this.coordinatorID;
+    }
+
+    /**
+     * Sets the coordinator ID of the replica.
+     * @param coordinatorID The new coordinator ID to be set.
+     */
+    public void setCoordinatorID(int coordinatorID) {
+        this.coordinatorID = coordinatorID;
+    }
+
     public EpochPair getEpochPair() {
         return this.epochPair;
     }
@@ -184,6 +200,10 @@ public class Replica extends AbstractReplica implements DistributedActor {
     public void setEpochPair(EpochPair epochPair) throws IllegalArgumentException {
         if (epochPair == null) {
             throw new IllegalArgumentException("EpochPair cannot be null");
+        }
+        if (this.epochPair == null) {
+            this.epochPair = epochPair;
+            return;
         }
         if (this.epochPair.compareTo(epochPair) > 0) {
             throw new IllegalArgumentException("New epochPair must be greater than or equal to the current epochPair");
