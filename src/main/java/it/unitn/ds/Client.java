@@ -57,7 +57,8 @@ public class Client extends AbstractClient implements DistributedActor {
 
     @Override
     public void sendWrite(ActorRef replica, int index, int value) {
-        WriteTransaction transaction = new WriteTransaction(this.getNextTransactionId(), this, null, index, value, replica);
+        WriteTransaction transaction =
+                new WriteTransaction(this.getNextTransactionId(), this, null, index, value, replica);
         scheduleTransaction(transaction);
     }
 
@@ -114,7 +115,7 @@ public class Client extends AbstractClient implements DistributedActor {
     public void onProbeMsg(ProbeMsg msg) {
         if (ProbeTransaction.MSG_START.equals(msg.content)) {
             // TODO: Pass the correct startEpochPair to the ProbeTransaction constructor
-            ProbeTransaction transaction = new ProbeTransaction(msg.transactionId, this, null,  msg, msg.sender);
+            ProbeTransaction transaction = new ProbeTransaction(msg.transactionId, this, null, msg, msg.sender);
             scheduleTransaction(transaction);
         } else {
             onMessage(msg);

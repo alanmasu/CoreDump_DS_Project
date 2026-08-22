@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 
 public class Replica extends AbstractReplica implements DistributedActor {
-   
+
     private static final int INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE = 0;
     private Map<Integer, ActorRef> groupOfReplicas;
     private List<Transaction> activeTransactions;
@@ -32,7 +32,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     private int crashCount;
     private AbstractReplica.Crash pendingCrash;
     ////////////////////////////////////////////
- 
+
     // Manages heartbeat sending or coordinator monitoring for this Replica
     private HeartbeatTransaction heartbeatTransaction;
 
@@ -147,21 +147,12 @@ public class Replica extends AbstractReplica implements DistributedActor {
         // All replicas will use the coordinator-created identity for this heartbeat term.
         ActorRef coordinator = groupOfReplicas.get(coordinatorID);
         if (coordinator == null) {
-            throw new IllegalStateException(
-                "Cannot initialize heartbeat: coordinator is not in the replica group."
-            );
+            throw new IllegalStateException("Cannot initialize heartbeat: coordinator is not in the replica group.");
         }
 
-        TransactionId heartbeatTransactionId = new TransactionId(
-            coordinator,
-            INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE
-        );
+        TransactionId heartbeatTransactionId = new TransactionId(coordinator, INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE);
 
-        this.heartbeatTransaction = new HeartbeatTransaction(
-            heartbeatTransactionId,
-            this,
-            null
-        );
+        this.heartbeatTransaction = new HeartbeatTransaction(heartbeatTransactionId, this, null);
 
         scheduleTransaction(this.heartbeatTransaction);
     }
@@ -243,32 +234,14 @@ public class Replica extends AbstractReplica implements DistributedActor {
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
-            .match(
-                WriteMsg.class, 
-                this::onWriteMsg
-            )
-            .match(
-                WriteFinishMsg.class, 
-                this::onMessage
-            )
-            .match(
-                HeartbeatTransaction.HeartbeatTickMsg.class,
-                this::onHeartbeatTick
-            )
-            .match(
-                HeartbeatTransaction.HeartbeatMsg.class,
-                this::onHeartbeat
-            )
-            .match(
-                HeartbeatTransaction.WatchdogExpiredMsg.class,
-                this::onWatchdogExpired
-            )
-            // Handle TestMsg messages, leave it as last
-            .match(
-                ProbeMsg.class,
-                this::onProbeMsg
-            )
-            .build();
+                .match(WriteMsg.class, this::onWriteMsg)
+                .match(WriteFinishMsg.class, this::onMessage)
+                .match(HeartbeatTransaction.HeartbeatTickMsg.class, this::onHeartbeatTick)
+                .match(HeartbeatTransaction.HeartbeatMsg.class, this::onHeartbeat)
+                .match(HeartbeatTransaction.WatchdogExpiredMsg.class, this::onWatchdogExpired)
+                // Handle TestMsg messages, leave it as last
+                .match(ProbeMsg.class, this::onProbeMsg)
+                .build();
     }
 
     /**
@@ -276,7 +249,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * @param msg Incoming message to be processed by the appropriate Transaction.
      */
     public void onMessage(Msg msg) {
-        if(this.replicaStatus == CrashStatus.CRASHED){
+        if (this.replicaStatus == CrashStatus.CRASHED) {
             return;
         }
         for (Transaction transaction : activeTransactions) {
@@ -286,18 +259,19 @@ public class Replica extends AbstractReplica implements DistributedActor {
             }
         }
     }
-    
+
     public void onWriteMsg(WriteMsg msg) {
         // TODO: when the method will be implemented, change the null with the current EpochPair of the replica
-        WriteTransaction transaction = new WriteTransaction(msg.transactionId, this, null, msg.index, msg.value, msg.sender);
+        WriteTransaction transaction =
+                new WriteTransaction(msg.transactionId, this, null, msg.index, msg.value, msg.sender);
         scheduleTransaction(transaction);
     }
-        
 
     /// For testing
     public void onProbeMsg(ProbeMsg msg) {
         if (ProbeTransaction.MSG_START.equals(msg.content)) {
-            ProbeTransaction transaction = new ProbeTransaction(msg.transactionId, this, msg.epochPair, msg, msg.sender);
+            ProbeTransaction transaction =
+                    new ProbeTransaction(msg.transactionId, this, msg.epochPair, msg, msg.sender);
             scheduleTransaction(transaction);
         } else {
             onMessage(msg);
