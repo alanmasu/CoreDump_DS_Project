@@ -2,7 +2,6 @@ package it.unitn.ds;
 
 import scala.concurrent.duration.Duration;
 import java.util.concurrent.TimeUnit;
-import it.unitn.ds.Transaction.TransactionId;
 
 import akka.actor.ActorRef;
 
@@ -122,14 +121,6 @@ public final class HeartbeatTransaction extends Transaction {
     private State state;
 
     /**
-     * The Replica whose heartbeat behavior this transaction manages.
-     * 
-     * Transaction.owner references the same object, but its type is AbstractActor.
-     * Keeping this typed reference gives us access to Replica-specific data.
-     */
-    private final Replica replica;
-
-    /**
      * Identifies the follower's currently active watchdog.
      * 
      * It starts at zero and increases whenever a new watchdog is scheduled.
@@ -147,9 +138,15 @@ public final class HeartbeatTransaction extends Transaction {
     public HeartbeatTransaction(TransactionId transactionId, Replica owner, EpochPair startEpochPair) {
         super(transactionId, owner, startEpochPair);
 
-        this.replica = owner;
         this.state = State.STOPPED;
         this.watchdogVersion = 0;
+    }
+
+    /**
+     * Returns the owning Replica with its concrete type.
+     */
+    private Replica replica() {
+        return (Replica) owner;
     }
 
     /**
@@ -158,12 +155,13 @@ public final class HeartbeatTransaction extends Transaction {
      * Repeated calls are ignored so that we cannot accidentally create multiple
      * heartbeat timers or watchdogs for the same transactions.
      */
+    @Override
     public void start() {
         if (state != State.STOPPED) {
             return;
         }
 
-        if (replica.id == replica.coordinatorID) {
+        if (replica().id == replica().coordinatorID) {
             state = State.COORDINATOR;
             scheduleHeartbeatTick();
         } else {
@@ -179,9 +177,9 @@ public final class HeartbeatTransaction extends Transaction {
     private long getWatchdogTimeoutMillis() {
         long heartbeatAllowance = 
             (long) MISSED_HEARTBEATS_BEFORE_FAILURE
-                * replica.getCoordinatorBeatInterval();
+                * replica().getCoordinatorBeatInterval();
         
-        return heartbeatAllowance + replica.getMaxLatencyPlusTolerance();
+        return heartbeatAllowance + replica().getMaxLatencyPlusTolerance();
     }
 
 
@@ -193,22 +191,22 @@ public final class HeartbeatTransaction extends Transaction {
      * mailbox and never crosses the network channel.
      */
     private void scheduleHeartbeatTick() {
-        timeout = replica.getContext()
+        timeout = replica().getContext()
                          .system()
                          .scheduler()
                          .scheduleOnce(
                             Duration.create(
-                                replica.getCoordinatorBeatInterval(),
+                                replica().getCoordinatorBeatInterval(),
                                 TimeUnit.MILLISECONDS
                             ), 
-                            replica.getSelf(),
+                            replica().getSelf(),
                             new HeartbeatTickMsg(
                                 getId(),
                                 startEpochPair,
-                                replica.getSelf()
+                                replica().getSelf()
                             ),
-                            replica.getContext().system().dispatcher(),
-                            replica.getSelf()    
+                            replica().getContext().system().dispatcher(),
+                            replica().getSelf()    
                         ); 
     }
 
@@ -223,7 +221,7 @@ public final class HeartbeatTransaction extends Transaction {
 
         watchdogVersion++;
 
-        timeout = replica.getContext()
+        timeout = replica().getContext()
                          .system()
                          .scheduler()
                          .scheduleOnce(
@@ -231,15 +229,15 @@ public final class HeartbeatTransaction extends Transaction {
                                 getWatchdogTimeoutMillis(),
                                 TimeUnit.MILLISECONDS      
                             ),
-                            replica.getSelf(),
+                            replica().getSelf(),
                             new WatchdogExpiredMsg(
                                 getId(),
                                 startEpochPair,
-                                replica.getSelf(),
+                                replica().getSelf(),
                                 watchdogVersion
                             ),
-                            replica.getContext().system().dispatcher(),
-                            replica.getSelf()
+                            replica().getContext().system().dispatcher(),
+                            replica().getSelf()
                          );
     }
 
@@ -253,12 +251,12 @@ public final class HeartbeatTransaction extends Transaction {
             return;
         }
 
-        replica.broadcast(
+        replica().broadcast(
             new HeartbeatMsg(
                 getId(),
                 startEpochPair,
-                replica.getSelf(),
-                replica.id
+                replica().getSelf(),
+                replica().id
             )
         );
         scheduleHeartbeatTick();
@@ -276,7 +274,7 @@ public final class HeartbeatTransaction extends Transaction {
             return;
         }
 
-        if (heartbeat.coordinatorId != replica.coordinatorID) {
+        if (heartbeat.coordinatorId != replica().coordinatorID) {
             return;
         }
 
@@ -308,10 +306,6 @@ public final class HeartbeatTransaction extends Transaction {
         }
 
         state = State.ELECTION_REQUESTED;
-
-        // The scheduled timeout has fired, so no active scheduled timeout remains.
-        timeout = null;
-
 
         // TODO: ELECTION_TRANSACTION must be started here once it's implemented
     }
