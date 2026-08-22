@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter
+    xmlns="https://github.com/spotbugs/filter/3.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="https://github.com/spotbugs/filter/3.0.0 https://raw.githubusercontent.com/spotbugs/spotbugs/master/spotbugs/etc/findbugsfilter.xsd">
+
+    <!-- Nothing is ever serialized: single JVM, no Akka remoting, messages are Serializable
+         by Akka convention only. Same decision as MissingSerialVersionUID in the PMD
+         ruleset; revisit both together if Akka Remote or Cluster is ever enabled. -->
+    <Match>
+        <Bug pattern="SE_NO_SERIALVERSIONID"/>
+    </Match>
+
+    <!-- Course-template infrastructure, excluded from PMD too (see build.gradle). -->
+    <Match>
+        <Class name="~it\.unitn\.ds\.(Logger|NetworkChannel)(\$.*)?"/>
+    </Match>
+
+    <!-- TestsSystemWrapper lives in TestsCommons, which is course template and therefore
+         outside the analysed set (see build.gradle). SpotBugs sees our tests read those
+         fields but never sees createTestSystem() write them, so it calls them unwritten.
+         They are written; the analyser is just looking through a keyhole.
+
+         The filter cannot be tied to the declaring class — <Field> only takes name, type
+         and role — so it is narrowed three ways instead: the reading class must be one of
+         ours, and the field must match both name and type. -->
+    <Match>
+        <Class name="~it\.unitn\.ds\.(regression|contract)\..*"/>
+        <Bug pattern="NP_UNWRITTEN_PUBLIC_OR_PROTECTED_FIELD,UWF_UNWRITTEN_PUBLIC_OR_PROTECTED_FIELD"/>
+        <Or>
+            <Field name="system" type="akka.actor.ActorSystem"/>
+            <Field name="actors" type="java.util.Map"/>
+            <Field name="probes" type="java.util.Map"/>
+        </Or>
+    </Match>
+
+</FindBugsFilter>

@@ -2,33 +2,42 @@ package it.unitn.ds;
 
 import akka.actor.ActorRef;
 import akka.actor.Props;
-import it.unitn.ds.TestTransaction.TestMsg;
+import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.Transaction.TransactionId;
-
 import java.util.LinkedList;
 import java.util.Optional;
 import java.util.Queue;
 
-public class Client extends AbstractClient implements DistributedActor{
+public class Client extends AbstractClient implements DistributedActor {
 
     private int transactionCounter;
 
     Queue<Transaction> scheduledTransactions;
     Transaction currentTransaction;
-    
-    Client(long readTimeoutDelay, long writeTimeoutDelay, Optional<ActorRef> defaultTargetReplica, Optional<ActorRef> listener) {
+
+    Client(
+            long readTimeoutDelay,
+            long writeTimeoutDelay,
+            Optional<ActorRef> defaultTargetReplica,
+            Optional<ActorRef> listener) {
         super(readTimeoutDelay, writeTimeoutDelay, listener, defaultTargetReplica);
         scheduledTransactions = new LinkedList<>();
         transactionCounter = 0;
     }
 
     public static Props props(long readTimeoutDelay, long writeTimeoutDelay, Optional<ActorRef> defaultTargetReplica) {
-        return Props.create(Client.class, () -> new Client(readTimeoutDelay, writeTimeoutDelay, defaultTargetReplica, Optional.empty()));
+        return Props.create(
+                Client.class,
+                () -> new Client(readTimeoutDelay, writeTimeoutDelay, defaultTargetReplica, Optional.empty()));
     }
 
     // Props method for automated tests
-    public static Props propsWithListener(long readTimeoutDelay, long writeTimeoutDelay, Optional<ActorRef> defaultTargetReplica, ActorRef listener) {
-        return Props.create(Client.class, () -> new Client(readTimeoutDelay, writeTimeoutDelay, defaultTargetReplica, Optional.ofNullable(listener)));
+    public static Props propsWithListener(
+            long readTimeoutDelay, long writeTimeoutDelay, Optional<ActorRef> defaultTargetReplica, ActorRef listener) {
+        return Props.create(
+                Client.class,
+                () -> new Client(
+                        readTimeoutDelay, writeTimeoutDelay, defaultTargetReplica, Optional.ofNullable(listener)));
     }
 
     /**
@@ -43,62 +52,72 @@ public class Client extends AbstractClient implements DistributedActor{
 
     @Override
     public void sendRead(ActorRef replica, int index) {
-        // TODO: implement        
-    }
-
-    @Override
-    public void sendWrite(ActorRef replica, int index, int value) {
         // TODO: implement
     }
 
     @Override
+    public void sendWrite(ActorRef replica, int index, int value) {
+        WriteTransaction transaction = new WriteTransaction(this.getNextTransactionId(), this, null, index, value, replica);
+        scheduleTransaction(transaction);
+    }
+
+    @Override
     public TransactionId getNextTransactionId() {
-        return new TransactionId(this.getSelf(), transactionCounter++);
+        TransactionId id = new TransactionId(this.getSelf(), transactionCounter);
+        ++transactionCounter;
+        return id;
     }
 
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
-                .match(TestMsg.class, this::onTestMsg)
+                .match(WriteTransaction.WriteTimeoutMsg.class, this::onMessage)
+                .match(WriteTransaction.WriteResultMsg.class, this::onMessage)
+                // Handle TestMsg messages, leave it as last
+                .match(ProbeMsg.class, this::onProbeMsg)
                 .build();
     }
 
     @Override
     public void scheduleTransaction(Transaction transaction) {
         debug("Scheduled transaction: " + transaction.getId());
-        if(this.currentTransaction == null) {
+        if (this.currentTransaction == null) {
             this.currentTransaction = transaction;
             transaction.start();
-        }else {
+        } else {
             this.scheduledTransactions.add(transaction);
         }
-    }   
+    }
 
     @Override
     public void onTransactionComplete(Transaction transaction) {
         debug("Transaction completed: " + transaction.getId());
-        Transaction nextTransaction = scheduledTransactions.poll();
-        if(nextTransaction != null) {
-            this.currentTransaction = nextTransaction;
-            nextTransaction.start();
-        } else {
-            this.currentTransaction = null;
+        this.currentTransaction = scheduledTransactions.poll();
+        if (this.currentTransaction != null) {
+            this.currentTransaction.start();
         }
     }
 
+    /**
+     * Handles incoming messages.
+     * @param msg The message to be handled.
+     */
     public void onMessage(Msg msg) {
-        currentTransaction.computeState(msg);
+        if (currentTransaction != null && currentTransaction.getId().equals(msg.transactionId)) {
+            currentTransaction.computeState(msg);
+        } else {
+            debug("Discarded message for inactive transaction: " + msg.transactionId);
+        }
     }
 
     /// For testing
-    public void onTestMsg(TestMsg msg) {
-        if(msg.content.equals("start")){
-            TestTransaction transaction = new TestTransaction(msg.transactionId,this, msg.epochPair, msg, msg.sender);
+    public void onProbeMsg(ProbeMsg msg) {
+        if (ProbeTransaction.MSG_START.equals(msg.content)) {
+            // TODO: Pass the correct startEpochPair to the ProbeTransaction constructor
+            ProbeTransaction transaction = new ProbeTransaction(msg.transactionId, this, null,  msg, msg.sender);
             scheduleTransaction(transaction);
-        }else {
+        } else {
             onMessage(msg);
         }
     }
-       
-
-}           
+}

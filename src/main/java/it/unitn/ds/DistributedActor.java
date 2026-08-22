@@ -1,14 +1,13 @@
 package it.unitn.ds;
 
-
 import akka.actor.ActorRef;
 import it.unitn.ds.Transaction.TransactionId;
 
 public interface DistributedActor {
     /**
      * Returns the self ActorRef of the implementing actor.
-     *  
-    */
+     *
+     */
     public ActorRef getSelf();
 
     /**
@@ -17,7 +16,6 @@ public interface DistributedActor {
      * @param transaction The completed transaction.
      */
     public void onTransactionComplete(Transaction transaction);
-
 
     /**
      * Schedules a transaction for processing.
@@ -42,7 +40,7 @@ public interface DistributedActor {
     public TransactionId getNextTransactionId();
 
 
-    // TODO: this is not usefull for the Client Class
+    // // This is not usefull for the Client Class
     // /**
     //  * Sends a message to all actors in the system.
     //  *

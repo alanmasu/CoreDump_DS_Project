@@ -19,9 +19,10 @@ classDiagram
     %% class, because Mermaid has no notation for class nesting.
     %%
     %% SCOPE: only the message types. TransactionId and EpochPair appear as field
-    %% types but have no box here - see Transactions_UML.mmd.
-    %% The protocol messages (Update, WriteOK, Election, Synchronization,
-    %% Heartbeat) exist only in the sequence diagrams so far, not yet in Java.
+    %% types but have no box here - see TransactionBase_UML.mmd.
+    %% Heartbeat messages are implemented and documented in
+    %% HeartbeatMessages_UML.mmd. The other protocol messages still exist only in
+    %% the sequence diagrams.
     %% Infrastructure and test plumbing (InitSystem, Crash and the listener
     %% notification messages) are deliberately omitted.
     %% ==================================================================
@@ -40,8 +41,8 @@ classDiagram
             +Msg(TransactionId tId, EpochPair epochPair, ActorRef sender)
         }
 
-        class TestMsg {
-            <<TestTransaction>>
+        class ProbeMsg {
+            <<ProbeTransaction>>
             +String content
         }
 
@@ -92,7 +93,7 @@ classDiagram
     }
 
     Msg ..|> Serializable
-    TestMsg --|> Msg
+    ProbeMsg --|> Msg
     Result --|> Msg
     ReadResult --|> Result
     WriteResult --|> Result

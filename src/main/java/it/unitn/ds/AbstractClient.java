@@ -93,21 +93,18 @@ public abstract class AbstractClient extends AbstractActor {
         }
     }
 
-    private static class Result extends Msg {
-        public final Boolean success;
+    private static class Result{
+        public final boolean success;
         public final int index;
-        public final Integer value;
+        public final int value;
         public final int fromReplica;
 
-        public Result(boolean success, int index, Integer value, int fromReplica) {
-            super(null, null, null);
+        public Result(boolean success, int index, int value, int fromReplica) {
             this.success = success;
             this.index = index;
             this.value = value;
             this.fromReplica = fromReplica;
         }
-
-
 
         @Override
         public boolean equals(Object obj) {
@@ -118,30 +115,38 @@ public abstract class AbstractClient extends AbstractActor {
         }
 
         @Override
+        public int hashCode() {
+            int result = Boolean.hashCode(success);
+            result = 31 * result + Integer.hashCode(index);
+            result = 31 * result + Integer.hashCode(value);
+            result = 31 * result + Integer.hashCode(fromReplica);
+            return result;
+        }
+
+        @Override
         public String toString() {
             return "(" + success + ", " + index + ", " + value + ", " + fromReplica + ")";
         }
     }
 
     public static class ReadResult extends Result {
-        public ReadResult(boolean success, int index, Integer value, int fromReplica) {
+        public ReadResult(boolean success, int index, int value, int fromReplica) {
             super(success, index, value, fromReplica);
         }
     }
 
     public static class WriteResult extends Result {
-        public WriteResult(boolean success, int index, Integer value, int fromReplica) {
+        public WriteResult(boolean success, int index, int value, int fromReplica) {
             super(success, index, value, fromReplica);
         }
     }
 
-    private static class Timeout extends Msg {
+    private static class Timeout{
         public final ActorRef client;
         public final ActorRef replica;
         public final int index;
 
         public Timeout(ActorRef client, ActorRef replica, int index) {
-            super(null, null, null);
             this.client = client;
             this.replica = replica;
             this.index = index;
@@ -153,6 +158,14 @@ public abstract class AbstractClient extends AbstractActor {
                 return ((Timeout)obj).client.equals(this.client) && ((Timeout)obj).replica.equals(this.replica) && ((Timeout)obj).index == this.index;
             }
             return super.equals(obj);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = client.hashCode();
+            result = 31 * result + replica.hashCode();
+            result = 31 * result + Integer.hashCode(index);
+            return result;
         }
     }
 
@@ -226,23 +239,23 @@ public abstract class AbstractClient extends AbstractActor {
     // Wrapper Handlers
     // =================================================================================
 
-    private final void onReadRequest(AbstractClient.ReadRequest msg) throws Exception {
+    private final void onReadRequest(AbstractClient.ReadRequest msg) throws NullPointerException {
         if (msg.replica != null) {
             sendRead(msg.replica, msg.index);
         } else if (defaultTargetReplica.isPresent()) {
             sendRead(defaultTargetReplica.get(), msg.index);
         } else {
-            throw new Exception("Target replica not found: neither in AbstractClient.WriteRequest nor in AbstractClient.defaultTargetReplica.");
+            throw new NullPointerException("Target replica not found: neither in AbstractClient.WriteRequest nor in AbstractClient.defaultTargetReplica.");
         }
     }
 
-    private final void onWriteRequest(AbstractClient.WriteRequest msg) throws Exception {
+    private final void onWriteRequest(AbstractClient.WriteRequest msg) throws NullPointerException {
         if (msg.replica != null) {
             sendWrite(msg.replica, msg.index, msg.value);
         } else if (defaultTargetReplica.isPresent()) {
             sendWrite(defaultTargetReplica.get(), msg.index, msg.value);
         } else {
-            throw new Exception("Target replica not found: neither in AbstractClient.WriteRequest nor in AbstractClient.defaultTargetReplica.");
+            throw new NullPointerException("Target replica not found: neither in AbstractClient.WriteRequest nor in AbstractClient.defaultTargetReplica.");
         }
     }
 
