@@ -64,18 +64,15 @@ public class TestHeartbeatTransaction {
 
             assertEquals(
                 expectedHeartbeatTransactionId,
-                firstHeartbeat.transactionId
-            );
+                    firstHeartbeat.transactionId,
+                    "every heartbeat of a term must carry the transaction id the coordinator created");
 
             assertEquals(
                 coordinatorId,
-                firstHeartbeat.coordinatorId
-            );
+                    firstHeartbeat.coordinatorId,
+                    "the heartbeat must name the replica that sent it as coordinator");
 
-            assertEquals(
-                coordinator,
-                firstHeartbeat.sender
-            );
+            assertEquals(coordinator, firstHeartbeat.sender, "the heartbeat must come from the coordinator itself");
 
             HeartbeatMsg secondHeartbeat = followerProbe.expectMsgClass(
                 Duration.ofSeconds(2),
@@ -84,18 +81,16 @@ public class TestHeartbeatTransaction {
 
             assertEquals(
                 expectedHeartbeatTransactionId,
-                secondHeartbeat.transactionId
-            );
+                    secondHeartbeat.transactionId,
+                    "the second heartbeat must reuse the same transaction id, not open a new one");
 
             assertEquals(
                 coordinatorId,
-                secondHeartbeat.coordinatorId
-            );
+                    secondHeartbeat.coordinatorId,
+                    "the coordinator must not change between heartbeats of the same term");
 
             assertEquals(
-                coordinator,
-                secondHeartbeat.sender
-            );
+                    coordinator, secondHeartbeat.sender, "the second heartbeat must come from the same coordinator");
 
         } finally {
             TestKit.shutdownActorSystem(system);
@@ -177,8 +172,8 @@ public class TestHeartbeatTransaction {
 
             assertEquals(
                 activeTransactionId,
-                heartbeat.transactionId
-            );
+                    heartbeat.transactionId,
+                    "the tick must be routed to the active heartbeat transaction, not to a new one");
         } finally {
             TestKit.shutdownActorSystem(system);
         }
