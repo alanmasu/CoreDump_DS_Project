@@ -4,6 +4,7 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import akka.actor.ActorRef;
+import it.unitn.ds.WriteTransaction.WriteFinishMsg;
 import scala.concurrent.duration.Duration;
 
 public class UpdateTransaction extends Transaction {
@@ -146,7 +147,7 @@ public class UpdateTransaction extends Transaction {
         if(this.state != UpdateTransactionState.INIT){
             throw new IllegalStateException("UpdateTransaction " + this.getId() + " is not in INIT state, cannot start.");
         }
-        replica.debug("Started UpdateTransaction: " + this.getId());   
+        // replica.debug("Started UpdateTransaction: " + this.getId());   
         if(this.writeTid.isPresent()) { // Case 1: Participant replica who wants to update an element
             forwardToCoordinator(replica);
         }else if(this.destination.isPresent() && !replica.isCoordinator()) {  // Case 2: Participant replica who received an UpdateMsg from the coordinator
@@ -160,6 +161,7 @@ public class UpdateTransaction extends Transaction {
     //////////////////////////////////////////
     
     protected void forwardToCoordinator(Replica replica){
+        replica.debug("Forwarding UpdateTransaction " + this.getId() + " to coordinator | index: " + this.index + " value: " + this.value);
         this.state = UpdateTransactionState.WAITING_UPDATE;    
         UpdateMsg updateMsg = new UpdateMsg(this.getId(), null, replica.getSelf(), this.index, this.value);
         replica.unicast(updateMsg, this.destination.get());
@@ -173,6 +175,7 @@ public class UpdateTransaction extends Transaction {
     }
     
     protected void startAsReplica(Replica replica){
+        replica.debug("Started UpdateTransaction " + this.getId() + " as replica | index: " + this.index + " value: " + this.value);
         this.state = UpdateTransactionState.WAITING_WRITEOK;    
         UpdateAckMsg updateAckMsg = new UpdateAckMsg(this.getId(), this.startEpochPair, replica.getSelf());
         replica.unicast(updateAckMsg, this.destination.get());
@@ -186,8 +189,10 @@ public class UpdateTransaction extends Transaction {
     }
 
     protected void startAsCoordinator(Replica replica){
+        replica.debug("Started UpdateTransaction " + this.getId() + " as coordinator | index: " + this.index + " value: " + this.value);
         UpdateMsg updateMsg = new UpdateMsg(this.getId(), this.startEpochPair, replica.getSelf(), this.index, this.value);
-        replica.broadcast(updateMsg, true);
+        replica.broadcast(updateMsg);
+        this.coordinatorAckCount = 1; // Count the coordinator itself as an acknowledgment
         this.state = UpdateTransactionState.WAITING_ACK;
     }
 
@@ -202,6 +207,8 @@ public class UpdateTransaction extends Transaction {
                 // TODO: implement the EpochPair update
                 // TODO: Implement the storage to the history of the replica
                 this.state = UpdateTransactionState.COMMITTED;
+                replica.callbackOnUpdateApplied(writeOk.index, writeOk.value);
+                replica.onTransactionComplete(this);
             }
         }  
     }
@@ -223,6 +230,7 @@ public class UpdateTransaction extends Transaction {
                 replica.getSelf()
             );
         } else if(msg instanceof WriteOkMsg){
+            WriteOkMsg writeOkMsg = (WriteOkMsg) msg;
             if(this.timeout != null){
                 this.timeout.cancel();
                 this.timeout = null;
@@ -231,13 +239,19 @@ public class UpdateTransaction extends Transaction {
             // TODO: Update the EpochPair on the replica
             this.state = UpdateTransactionState.COMMITTED;
             owner.onTransactionComplete(this);
-        }else if (msg instanceof UpdateTimeoutMsg || msg instanceof WriteOkTimeoutMsg){
-            this.timeout = null;
-            this.state = UpdateTransactionState.WAITING_ELECTION;
-            // TODO: Schedule the ElectionTransaction here.
-            replica.scheduleTransaction(null);
-            // TODO: Understend what to to here, if terminate this transaction, or wait the election
+            replica.callbackOnUpdateApplied(writeOkMsg.index, writeOkMsg.value);
+            if(this.writeTid.isPresent()){
+                WriteFinishMsg writeFinishMsg = new WriteFinishMsg(this.writeTid.get(), this.startEpochPair, replica.getSelf());
+                replica.getSelf().tell(writeFinishMsg, replica.getSelf());
+            }
         }
+        // else if (msg instanceof UpdateTimeoutMsg || msg instanceof WriteOkTimeoutMsg){
+        //     this.timeout = null;
+        //     this.state = UpdateTransactionState.WAITING_ELECTION;
+        //     // TODO: Schedule the ElectionTransaction here.
+        //     replica.scheduleTransaction(null);
+        //     // TODO: Understend what to to here, if terminate this transaction, or wait the election
+        // }
     }
 
 }

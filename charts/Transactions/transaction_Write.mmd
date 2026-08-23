@@ -26,7 +26,6 @@ sequenceDiagram
             note over R1: R1 as coordinator has <e,i> = <2,4>
             note over R1: Start a UpdateTransaction<R2, 0> on R1
             par
-                R1 ->> R1: UpdateMsg(idx, val, <2,4>, <R2, 0>)
                 R1 ->> R2: UpdateMsg(idx, val, <2,4>, <R2, 0>)
                 R1 ->> R3: UpdateMsg(idx, val, <2,4>, <R2, 0>) 
             end 

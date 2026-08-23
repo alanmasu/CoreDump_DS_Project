@@ -4,7 +4,11 @@ import akka.actor.ActorRef;
 import akka.actor.Props;
 import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.Transaction.TransactionId;
+import it.unitn.ds.UpdateTransaction.UpdateAckMsg;
 import it.unitn.ds.UpdateTransaction.UpdateMsg;
+import it.unitn.ds.UpdateTransaction.UpdateTimeoutMsg;
+import it.unitn.ds.UpdateTransaction.WriteOkMsg;
+import it.unitn.ds.UpdateTransaction.WriteOkTimeoutMsg;
 import it.unitn.ds.WriteTransaction.WriteFinishMsg;
 import it.unitn.ds.WriteTransaction.WriteMsg;
 import java.util.LinkedList;
@@ -14,7 +18,6 @@ import java.util.Optional;
 
 public class Replica extends AbstractReplica implements DistributedActor {
    
-    private static final int INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE = 0;
     private Map<Integer, ActorRef> groupOfReplicas;
     private List<Transaction> activeTransactions;
     private int transactionCounter;
@@ -84,6 +87,10 @@ public class Replica extends AbstractReplica implements DistributedActor {
                     "Index must be between 0 and " + (AbstractReplica.POSITIONS_LIST_LENGTH - 1));
         }
         positions[index] = value;
+    }
+    
+    public ActorRef getCoordinator() {
+        return groupOfReplicas.get(coordinatorID);
     }
 
     ///////////// Sending helpers ////////////
@@ -160,13 +167,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
             );
         }
 
-        TransactionId heartbeatTransactionId = new TransactionId(
-            coordinator,
-            INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE
-        );
-
         this.heartbeatTransaction = new HeartbeatTransaction(
-            heartbeatTransactionId,
+            getNextTransactionId(),
             this,
             null
         );
@@ -252,6 +254,11 @@ public class Replica extends AbstractReplica implements DistributedActor {
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
             .match(UpdateMsg.class, this::onUpdateMsg)
+            .match(UpdateTimeoutMsg.class, this::onMessage)
+            .match(UpdateAckMsg.class, this::onMessage)
+            .match(UpdateTimeoutMsg.class, this::onMessage)
+            .match(WriteOkMsg.class, this::onMessage)
+            .match(WriteOkTimeoutMsg.class, this::onMessage)
             .match(
                 WriteMsg.class, 
                 this::onWriteMsg
@@ -303,9 +310,13 @@ public class Replica extends AbstractReplica implements DistributedActor {
     }
         
     void onUpdateMsg(UpdateMsg msg){
-        if(msg.transactionId.initiator.equals(this.getSelf())){
-            UpdateTransaction transaction = new UpdateTransaction(msg.transactionId, this, msg.epochPair, msg.index, msg.index, msg.transactionId.initiator);
+        // debug("Received UpdateMsg for transaction: " + msg.transactionId);
+        // debug("Received UpdateMsg [index: " + msg.index + ", value: " + msg.value + "]");
+        if(!msg.transactionId.initiator.equals(this.getSelf())){
+            UpdateTransaction transaction = new UpdateTransaction(msg.transactionId, this, msg.epochPair, msg.index, msg.value, msg.transactionId.initiator);
             this.scheduleTransaction(transaction);
+        }else{
+            onMessage(msg);
         }
     }
 

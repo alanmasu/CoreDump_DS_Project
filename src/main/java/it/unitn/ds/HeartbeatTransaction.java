@@ -2,7 +2,6 @@ package it.unitn.ds;
 
 import scala.concurrent.duration.Duration;
 import java.util.concurrent.TimeUnit;
-import it.unitn.ds.Transaction.TransactionId;
 
 import akka.actor.ActorRef;
 
