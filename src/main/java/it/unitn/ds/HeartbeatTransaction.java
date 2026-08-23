@@ -125,7 +125,10 @@ public final class HeartbeatTransaction extends Transaction {
     /**
      * Returns the owning Replica with its concrete type.
      */
-    private Replica replica() {
+    private Replica getReplica() {
+        if(!(owner instanceof Replica)) {
+            throw new IllegalStateException("HeartbeatTransaction owner is not a Replica");
+        }
         return (Replica) owner;
     }
 
@@ -141,7 +144,7 @@ public final class HeartbeatTransaction extends Transaction {
             return;
         }
 
-        if (replica().id == replica().coordinatorID) {
+        if (getReplica().id == getReplica().coordinatorID) {
             state = State.COORDINATOR;
             scheduleHeartbeatTick();
         } else {
@@ -156,9 +159,9 @@ public final class HeartbeatTransaction extends Transaction {
      */
     private long getWatchdogTimeoutMillis() {
         long heartbeatAllowance =
-                (long) MISSED_HEARTBEATS_BEFORE_FAILURE * replica().getCoordinatorBeatInterval();
+                (long) MISSED_HEARTBEATS_BEFORE_FAILURE * getReplica().getCoordinatorBeatInterval();
 
-        return heartbeatAllowance + replica().getMaxLatencyPlusTolerance();
+        return heartbeatAllowance + getReplica().getMaxLatencyPlusTolerance();
     }
 
     /**
@@ -169,16 +172,16 @@ public final class HeartbeatTransaction extends Transaction {
      * mailbox and never crosses the network channel.
      */
     private void scheduleHeartbeatTick() {
-        timeout = replica()
+        timeout = getReplica()
                 .getContext()
                 .system()
                 .scheduler()
                 .scheduleOnce(
-                        Duration.create(replica().getCoordinatorBeatInterval(), TimeUnit.MILLISECONDS),
-                        replica().getSelf(),
-                        new HeartbeatTickMsg(getId(), startEpochPair, replica().getSelf()),
-                        replica().getContext().system().dispatcher(),
-                        replica().getSelf());
+                        Duration.create(getReplica().getCoordinatorBeatInterval(), TimeUnit.MILLISECONDS),
+                        getReplica().getSelf(),
+                        new HeartbeatTickMsg(getId(), startEpochPair, getReplica().getSelf()),
+                        getReplica().getContext().system().dispatcher(),
+                        getReplica().getSelf());
     }
 
     /**
@@ -191,17 +194,17 @@ public final class HeartbeatTransaction extends Transaction {
 
         watchdogVersion++;
 
-        timeout = replica()
+        timeout = getReplica()
                 .getContext()
                 .system()
                 .scheduler()
                 .scheduleOnce(
                         Duration.create(getWatchdogTimeoutMillis(), TimeUnit.MILLISECONDS),
-                        replica().getSelf(),
+                        getReplica().getSelf(),
                         new WatchdogExpiredMsg(
-                                getId(), startEpochPair, replica().getSelf(), watchdogVersion),
-                        replica().getContext().system().dispatcher(),
-                        replica().getSelf());
+                                getId(), startEpochPair, getReplica().getSelf(), watchdogVersion),
+                        getReplica().getContext().system().dispatcher(),
+                        getReplica().getSelf());
     }
 
     /**
@@ -214,7 +217,7 @@ public final class HeartbeatTransaction extends Transaction {
             return;
         }
 
-        replica().broadcast(new HeartbeatMsg(getId(), startEpochPair, replica().getSelf(), replica().id));
+        getReplica().broadcast(new HeartbeatMsg(getId(), startEpochPair, getReplica().getSelf(), getReplica().id));
         scheduleHeartbeatTick();
     }
 
@@ -229,7 +232,7 @@ public final class HeartbeatTransaction extends Transaction {
             return;
         }
 
-        if (heartbeat.coordinatorId != replica().coordinatorID) {
+        if (heartbeat.coordinatorId != getReplica().coordinatorID) {
             return;
         }
 
