@@ -304,7 +304,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     }
 
     /**
-     * This callback method is invoked whenever a message is recieved by the replica and the parameter allows to differentiate the type of message.
+     * This callback method is invoked whenever a message is received by the replica and the parameter allows to differentiate the type of message.
      * The callback then checks if the replica is in a pending crash state and if the type of message matches the pending crash type.
      * If so, it increments the crash count and checks if it has reached the threshold for crashing.
      * If the threshold is met, the replica's status is updated to CRASHED.
