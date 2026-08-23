@@ -6,8 +6,7 @@
 Repository for the **Distributed Systems** project assigned in the academic year **2025–2026**.  
 The project is implemented in **Java** using **Akka Actors**.
 
-The project requires **JDK 22**. The Gradle build selects Java 22 for compilation,
-tests, and application runs.
+The project requires **JDK 22**. The Gradle build selects Java 22 for compilation, tests, and application runs.
 
 ## Setting up Gradle
 

@@ -100,11 +100,10 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * @apiNote This method will be empowered in the future and will be able to send messages using total ordering
      */
     public void broadcast(Msg msg, boolean includeSelf) {
-        updateCrashStatusCallback(msg);
         if (this.replicaStatus == CrashStatus.CRASHED) {
             return;
         }
-
+        
         ActorRef target;
         for (Map.Entry<Integer, ActorRef> entry : groupOfReplicas.entrySet()) {
             target = entry.getValue();
@@ -112,6 +111,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
                 this.tell(msg, target);
             }
         }
+        updateCrashStatusCallback(msg);
     }
 
     /**
