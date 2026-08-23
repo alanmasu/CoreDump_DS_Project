@@ -1,0 +1,27 @@
+---
+title: HeartbeatTransaction coordinator FSM
+config:
+  theme: forest
+  layout: elk
+  markdownAutoWrap: false
+---
+
+stateDiagram-v2
+    direction LR
+
+    %% This chart describes a HeartbeatTransaction owned by the coordinator.
+    %% Transition labels identify received events; notes describe their effects.
+
+    [*] --> STOPPED: transaction constructed
+    STOPPED --> COORDINATOR: start() called
+
+    COORDINATOR --> COORDINATOR: HeartbeatTickMsg received
+
+    note right of COORDINATOR
+        Broadcast HeartbeatMsg.
+        Schedule the next HeartbeatTickMsg.
+    end note
+
+    %% Once the owning Replica has crashed, scheduled ticks can no longer cause
+    %% heartbeats to be broadcast.
+    COORDINATOR --> [*]: owning Replica crashes

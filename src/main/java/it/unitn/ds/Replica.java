@@ -4,13 +4,16 @@ import akka.actor.ActorRef;
 import akka.actor.Props;
 import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.Transaction.TransactionId;
+import it.unitn.ds.WriteTransaction.WriteFinishMsg;
+import it.unitn.ds.WriteTransaction.WriteMsg;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 public class Replica extends AbstractReplica implements DistributedActor {
-
+   
+    private static final int INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE = 0;
     private Map<Integer, ActorRef> groupOfReplicas;
     private List<Transaction> activeTransactions;
     private int transactionCounter;
@@ -19,7 +22,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     private int positions[];
     private int coordinatorID;
 
-    ///////////// For chashing ////////////
+    ///////////// For crashing ////////////
     private enum CrashStatus {
         NONE,
         PENDING,
@@ -30,6 +33,9 @@ public class Replica extends AbstractReplica implements DistributedActor {
     private int crashCount;
     private AbstractReplica.Crash pendingCrash;
     ////////////////////////////////////////////
+ 
+    // Manages heartbeat sending or coordinator monitoring for this Replica
+    private HeartbeatTransaction heartbeatTransaction;
 
     public Replica(int id) {
         this(
@@ -138,6 +144,27 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.coordinatorID = sysInit.coordinator_id;
         log("Initialized with group of replicas: " + getSystemNumberOfActors() + " replicas, coordinator ID: "
                 + coordinatorID);
+
+        // All replicas will use the coordinator-created identity for this heartbeat term.
+        ActorRef coordinator = groupOfReplicas.get(coordinatorID);
+        if (coordinator == null) {
+            throw new IllegalStateException(
+                "Cannot initialize heartbeat: coordinator is not in the replica group."
+            );
+        }
+
+        TransactionId heartbeatTransactionId = new TransactionId(
+            coordinator,
+            INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE
+        );
+
+        this.heartbeatTransaction = new HeartbeatTransaction(
+            heartbeatTransactionId,
+            this,
+            null
+        );
+
+        scheduleTransaction(this.heartbeatTransaction);
     }
 
     @Override
@@ -168,6 +195,43 @@ public class Replica extends AbstractReplica implements DistributedActor {
     public void onTransactionComplete(Transaction transaction) {
         activeTransactions.remove(transaction);
         debug("Transaction completed: " + transaction.getId());
+    }
+
+    /**
+     * Processes a coordinator's internal scheduled tick.
+     */
+    private void onHeartbeatTick(HeartbeatTransaction.HeartbeatTickMsg tick) {
+        if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
+            return;
+        }
+
+        onMessage(tick);
+
+        updateCrashStatusCallback(AbstractReplica.Crash.Type.Heartbeat);
+    }
+
+    /**
+     * Process a network heartbeat received by a follower.
+     */
+    private void onHeartbeat(HeartbeatTransaction.HeartbeatMsg heartbeat) {
+        if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
+            return;
+        }
+
+        onMessage(heartbeat);
+
+        updateCrashStatusCallback(AbstractReplica.Crash.Type.Heartbeat);
+    }
+
+    /**
+     * Processes the follower's internal watchdog event.
+     */
+    private void onWatchdogExpired(HeartbeatTransaction.WatchdogExpiredMsg expired) {
+        if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
+            return;
+        }
+
+        onMessage(expired);
     }
 
     @Override
@@ -214,9 +278,33 @@ public class Replica extends AbstractReplica implements DistributedActor {
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
-                .match(ProbeMsg.class, this::onProbeMsg)
-                .matchAny(msg -> defaultDispatcher(msg))
-                .build();
+            .match(
+                WriteMsg.class, 
+                this::onWriteMsg
+            )
+            .match(
+                WriteFinishMsg.class, 
+                this::onMessage
+            )
+            .match(
+                HeartbeatTransaction.HeartbeatTickMsg.class,
+                this::onHeartbeatTick
+            )
+            .match(
+                HeartbeatTransaction.HeartbeatMsg.class,
+                this::onHeartbeat
+            )
+            .match(
+                HeartbeatTransaction.WatchdogExpiredMsg.class,
+                this::onWatchdogExpired
+            )
+            // Handle TestMsg messages, leave it as last
+            .match(
+                ProbeMsg.class,
+                this::onProbeMsg
+            )
+            .matchAny(msg -> defaultDispatcher(msg))
+            .build();
     }
 
     /**
@@ -224,6 +312,9 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * @param msg Incoming message to be processed by the appropriate Transaction.
      */
     public void onMessage(Msg msg) {
+        if(this.replicaStatus == CrashStatus.CRASHED){
+            return;
+        }
         for (Transaction transaction : activeTransactions) {
             if (transaction.getId().equals(msg.transactionId)) {
                 transaction.computeState(msg);
@@ -231,6 +322,13 @@ public class Replica extends AbstractReplica implements DistributedActor {
             }
         }
     }
+    
+    public void onWriteMsg(WriteMsg msg) {
+        // TODO: when the method will be implemented, change the null with the current EpochPair of the replica
+        WriteTransaction transaction = new WriteTransaction(msg.transactionId, this, null, msg.index, msg.value, msg.sender);
+        scheduleTransaction(transaction);
+    }
+        
 
     /// For testing
     public void onProbeMsg(ProbeMsg msg) {

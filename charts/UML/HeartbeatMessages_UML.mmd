@@ -1,0 +1,49 @@
+---
+title: HeartbeatTransaction message classes
+config:
+  theme: forest
+---
+
+classDiagram
+    direction BT
+
+    %% All heartbeat messages carry the TransactionId and sender inherited from
+    %% Msg. HeartbeatMsg crosses NetworkChannel; HeartbeatTickMsg and
+    %% WatchdogExpiredMsg are local scheduler messages sent to the Replica itself.
+
+    class Msg {
+        <<abstract>>
+        +TransactionId transactionId
+        +EpochPair epochPair
+        +ActorRef sender
+        +Msg(TransactionId transactionId, EpochPair epochPair, ActorRef sender)
+    }
+
+    class HeartbeatTickMsg {
+        <<HeartbeatTransaction>>
+        +HeartbeatTickMsg(TransactionId transactionId, ActorRef sender)
+    }
+
+    class HeartbeatMsg {
+        <<HeartbeatTransaction>>
+        +int coordinatorId
+        +HeartbeatMsg(TransactionId transactionId, ActorRef sender, int coordinatorId)
+    }
+
+    class WatchdogExpiredMsg {
+        <<HeartbeatTransaction>>
+        +long watchdogVersion
+        +WatchdogExpiredMsg(TransactionId transactionId, ActorRef sender, long watchdogVersion)
+    }
+
+    class HeartbeatTransaction {
+        +void computeState(Msg msg)
+    }
+
+    HeartbeatTickMsg --|> Msg
+    HeartbeatMsg --|> Msg
+    WatchdogExpiredMsg --|> Msg
+
+    HeartbeatTransaction ..> HeartbeatTickMsg : creates and handles
+    HeartbeatTransaction ..> HeartbeatMsg : creates and handles
+    HeartbeatTransaction ..> WatchdogExpiredMsg : creates and handles

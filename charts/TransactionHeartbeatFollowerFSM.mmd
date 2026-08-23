@@ -1,0 +1,43 @@
+---
+title: HeartbeatTransaction follower FSM
+config:
+  theme: forest
+  layout: elk
+  markdownAutoWrap: false
+---
+
+stateDiagram-v2
+    direction LR
+
+    %% This chart describes a HeartbeatTransaction owned by a follower.
+    %% Transition labels identify received messages; notes describe their effects.
+
+    [*] --> STOPPED: transaction constructed
+    STOPPED --> WATCHING: start() called
+
+    WATCHING --> WATCHING: valid HeartbeatMsg received
+
+    note right of WATCHING
+        Cancel the current watchdog.
+        Increment watchdogVersion.
+        Schedule a new WatchdogExpiredMsg.
+    end note
+
+    %% Messages from an unexpected coordinator and watchdog messages from an
+    %% older generation do not change the follower state.
+    WATCHING --> WATCHING: invalid HeartbeatMsg received / ignore
+    WATCHING --> WATCHING: stale WatchdogExpiredMsg received / ignore
+
+    WATCHING --> ELECTION_REQUESTED: active WatchdogExpiredMsg received
+
+    note right of ELECTION_REQUESTED
+        Coordinator considered crashed.
+        ElectionTransaction integration is still pending.
+        Further watchdog messages are ignored.
+    end note
+
+    %% This future transition records the intended handoff once election support
+    %% is implemented.
+    ELECTION_REQUESTED --> [*]: ElectionTransaction starts
+
+    WATCHING --> [*]: owning Replica crashes

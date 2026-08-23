@@ -1,0 +1,79 @@
+---
+title: HeartbeatTransaction class structure
+config:
+  theme: forest
+---
+
+classDiagram
+    direction BT
+
+    %% This diagram focuses on the heartbeat transaction and the classes that
+    %% own it or provide its inherited identity and timer state. Heartbeat message
+    %% classes are documented separately in HeartbeatMessages_UML.mmd.
+
+    class Transaction {
+        <<abstract>>
+        #Cancellable timeout
+        #DistributedActor owner
+        -TransactionId id
+        +Transaction(TransactionId id, DistributedActor owner)
+        +void start()*
+        +String getState()*
+        +void computeState(Msg msg)*
+    }
+
+    class HeartbeatTransaction {
+        -int MISSED_HEARTBEATS_BEFORE_FAILURE$
+        -State state
+        -Replica replica
+        -long watchdogVersion
+        +HeartbeatTransaction(TransactionId transactionId, Replica owner)
+        +void start()
+        +String getState()
+        +void computeState(Msg msg)
+        -long getWatchdogTimeoutMillis()
+        -void scheduleHeartbeatTick()
+        -void restartWatchdog()
+        -void handleHeartbeatTick()
+        -void handleHeartbeat(HeartbeatMsg heartbeat)
+        -void handleWatchdogExpired(WatchdogExpiredMsg expired)
+    }
+
+    class State {
+        <<enumeration>>
+        STOPPED
+        COORDINATOR
+        WATCHING
+        ELECTION_REQUESTED
+    }
+
+    class Replica {
+        -HeartbeatTransaction heartbeatTransaction
+        -LinkedList~Transaction~ activeTransactions
+        +void scheduleTransaction(Transaction transaction)
+        +void onMessage(Msg msg)
+        +void broadcast(Msg msg)
+    }
+
+    class TransactionId {
+        <<Transaction>>
+        ~ActorRef initiator
+        ~int transactionId
+    }
+
+    class Cancellable {
+        <<akka.actor>>
+        +boolean cancel()
+    }
+
+    class Msg {
+        <<abstract>>
+    }
+
+    HeartbeatTransaction --|> Transaction
+    Replica "1" *-- "0..1" HeartbeatTransaction : heartbeatTransaction
+    HeartbeatTransaction "1" --> "1" Replica : replica
+    HeartbeatTransaction "1" --> "1" State : state
+    Transaction "1" o-- "1" TransactionId : id
+    Transaction "1" --> "0..1" Cancellable : timeout
+    HeartbeatTransaction ..> Msg : computeState(msg)
