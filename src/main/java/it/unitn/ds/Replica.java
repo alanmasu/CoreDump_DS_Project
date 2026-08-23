@@ -2,10 +2,13 @@ package it.unitn.ds;
 
 import akka.actor.ActorRef;
 import akka.actor.Props;
+import it.unitn.ds.HeartbeatTransaction.HeartbeatMsg;
+import it.unitn.ds.HeartbeatTransaction.WatchdogExpiredMsg;
 import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.Transaction.TransactionId;
 import it.unitn.ds.WriteTransaction.WriteFinishMsg;
 import it.unitn.ds.WriteTransaction.WriteMsg;
+
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -97,6 +100,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * @apiNote This method will be empowered in the future and will be able to send messages using total ordering
      */
     public void broadcast(Msg msg, boolean includeSelf) {
+        updateCrashStatusCallback(msg);
         if (this.replicaStatus == CrashStatus.CRASHED) {
             return;
         }
@@ -135,6 +139,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
             return;
         }
         this.tell(msg, target);
+        updateCrashStatusCallback(msg);
     }
     ////////////////////////////////////////////
 
@@ -161,7 +166,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.heartbeatTransaction = new HeartbeatTransaction(
             heartbeatTransactionId,
             this,
-            null
+            getEpochPair()
         );
 
         scheduleTransaction(this.heartbeatTransaction);
@@ -195,43 +200,6 @@ public class Replica extends AbstractReplica implements DistributedActor {
     public void onTransactionComplete(Transaction transaction) {
         activeTransactions.remove(transaction);
         debug("Transaction completed: " + transaction.getId());
-    }
-
-    /**
-     * Processes a coordinator's internal scheduled tick.
-     */
-    private void onHeartbeatTick(HeartbeatTransaction.HeartbeatTickMsg tick) {
-        if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
-            return;
-        }
-
-        onMessage(tick);
-
-        updateCrashStatusCallback(AbstractReplica.Crash.Type.Heartbeat);
-    }
-
-    /**
-     * Process a network heartbeat received by a follower.
-     */
-    private void onHeartbeat(HeartbeatTransaction.HeartbeatMsg heartbeat) {
-        if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
-            return;
-        }
-
-        onMessage(heartbeat);
-
-        updateCrashStatusCallback(AbstractReplica.Crash.Type.Heartbeat);
-    }
-
-    /**
-     * Processes the follower's internal watchdog event.
-     */
-    private void onWatchdogExpired(HeartbeatTransaction.WatchdogExpiredMsg expired) {
-        if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
-            return;
-        }
-
-        onMessage(expired);
     }
 
     @Override
@@ -282,22 +250,6 @@ public class Replica extends AbstractReplica implements DistributedActor {
                 WriteMsg.class, 
                 this::onWriteMsg
             )
-            .match(
-                WriteFinishMsg.class, 
-                this::onMessage
-            )
-            .match(
-                HeartbeatTransaction.HeartbeatTickMsg.class,
-                this::onHeartbeatTick
-            )
-            .match(
-                HeartbeatTransaction.HeartbeatMsg.class,
-                this::onHeartbeat
-            )
-            .match(
-                HeartbeatTransaction.WatchdogExpiredMsg.class,
-                this::onWatchdogExpired
-            )
             // Handle TestMsg messages, leave it as last
             .match(
                 ProbeMsg.class,
@@ -312,20 +264,24 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * @param msg Incoming message to be processed by the appropriate Transaction.
      */
     public void onMessage(Msg msg) {
+        boolean delivered = false;
         if(this.replicaStatus == CrashStatus.CRASHED){
             return;
         }
         for (Transaction transaction : activeTransactions) {
             if (transaction.getId().equals(msg.transactionId)) {
                 transaction.computeState(msg);
-                return;
+                delivered = true;
+                break;
             }
+        }
+        if(delivered){
+            updateCrashStatusCallback(msg);
         }
     }
     
     public void onWriteMsg(WriteMsg msg) {
-        // TODO: when the method will be implemented, change the null with the current EpochPair of the replica
-        WriteTransaction transaction = new WriteTransaction(msg.transactionId, this, null, msg.index, msg.value, msg.sender);
+        WriteTransaction transaction = new WriteTransaction(msg.transactionId, this, getEpochPair(), msg.index, msg.value, msg.sender);
         scheduleTransaction(transaction);
     }
         
@@ -354,12 +310,21 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * If the threshold is met, the replica's status is updated to CRASHED.
      * @param crashType Enum representing the type of message received, used to determine if the replica should crash and if to increment the crash count.
      */
-    void updateCrashStatusCallback(AbstractReplica.Crash.Type crashType) {
-        if (this.replicaStatus == CrashStatus.PENDING && this.pendingCrash.type == crashType) {
-            this.crashCount++;
-            if (this.crashCount >= this.pendingCrash.after_n_messages_of_type) {
-                this.replicaStatus = CrashStatus.CRASHED;
-                log("Replica crashed due to " + crashType + " crash.");
+    void updateCrashStatusCallback(Msg msg) {
+        if (this.replicaStatus == CrashStatus.PENDING) {
+            boolean shouldIncrementCrashCount = false;
+            shouldIncrementCrashCount = switch (msg) {
+                case HeartbeatMsg _, WatchdogExpiredMsg _ -> this.pendingCrash.type == Crash.Type.Heartbeat;
+                case WriteFinishMsg _ -> this.pendingCrash.type == Crash.Type.WriteOK;
+                default -> false;
+            };
+
+            if(shouldIncrementCrashCount){
+                this.crashCount++;
+                if (this.crashCount >= this.pendingCrash.after_n_messages_of_type) {
+                    this.replicaStatus = CrashStatus.CRASHED;
+                    log("Replica crashed due to " + this.pendingCrash.type + " crash.");
+                }
             }
         }
     }
