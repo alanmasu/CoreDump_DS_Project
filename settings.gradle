@@ -1,0 +1,7 @@
+// Lets Gradle fetch the JDK the toolchain asks for when the machine does not have it,
+// so a checkout builds without every contributor installing Java 25 by hand.
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+rootProject.name = 'CoreDump_DS_Project'

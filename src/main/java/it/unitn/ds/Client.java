@@ -12,8 +12,8 @@ public class Client extends AbstractClient implements DistributedActor {
 
     private int transactionCounter;
 
-    Queue<Transaction> scheduledTransactions;
-    Transaction currentTransaction;
+    private Queue<Transaction> scheduledTransactions;
+    private Transaction currentTransaction;
 
     Client(
             long readTimeoutDelay,
@@ -76,6 +76,7 @@ public class Client extends AbstractClient implements DistributedActor {
                 .match(WriteTransaction.WriteResultMsg.class, this::onMessage)
                 // Handle TestMsg messages, leave it as last
                 .match(ProbeMsg.class, this::onProbeMsg)
+                .matchAny(msg -> defaultDispatcher(msg))
                 .build();
     }
 
@@ -108,6 +109,12 @@ public class Client extends AbstractClient implements DistributedActor {
             currentTransaction.computeState(msg);
         } else {
             debug("Discarded message for inactive transaction: " + msg.transactionId);
+        }
+    }
+
+    void defaultDispatcher(Object msg) {
+        if (msg instanceof Msg) {
+            onMessage((Msg) msg);
         }
     }
 
