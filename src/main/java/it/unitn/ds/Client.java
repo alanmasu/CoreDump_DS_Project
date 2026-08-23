@@ -14,8 +14,8 @@ public class Client extends AbstractClient implements DistributedActor {
 
     private int transactionCounter;
 
-    Queue<Transaction> scheduledTransactions;
-    Transaction currentTransaction;
+    private Queue<Transaction> scheduledTransactions;
+    private Transaction currentTransaction;
 
     Client(
             long readTimeoutDelay,
@@ -61,7 +61,8 @@ public class Client extends AbstractClient implements DistributedActor {
 
     @Override
     public void sendWrite(ActorRef replica, int index, int value) {
-        // TODO: implement
+        WriteTransaction transaction = new WriteTransaction(this.getNextTransactionId(), this, null, index, value, replica);
+        scheduleTransaction(transaction);
     }
 
     @Override
@@ -74,9 +75,8 @@ public class Client extends AbstractClient implements DistributedActor {
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
-                .match(ReadResultMsg.class, this::onMessage)
-                .match(ReadTimeoutMsg.class, this::onMessage)
                 .match(ProbeMsg.class, this::onProbeMsg)
+                .matchAny(msg -> defaultDispatcher(msg))
                 .build();
     }
 
@@ -112,11 +112,17 @@ public class Client extends AbstractClient implements DistributedActor {
         }
     }
 
+    void defaultDispatcher(Object msg) {
+        if (msg instanceof Msg) {
+            onMessage((Msg) msg);
+        }
+    }
+
     /// For testing
     public void onProbeMsg(ProbeMsg msg) {
         if (ProbeTransaction.MSG_START.equals(msg.content)) {
             // TODO: Pass the correct startEpochPair to the ProbeTransaction constructor
-            ProbeTransaction transaction = new ProbeTransaction(msg.transactionId, this, null,  msg, msg.sender);
+            ProbeTransaction transaction = new ProbeTransaction(msg.transactionId, this, null, msg, msg.sender);
             scheduleTransaction(transaction);
         } else {
             onMessage(msg);
