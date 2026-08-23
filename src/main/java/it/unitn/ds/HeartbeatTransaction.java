@@ -163,7 +163,7 @@ public final class HeartbeatTransaction extends Transaction {
             return;
         }
 
-        if (replica.id == replica.coordinatorID) {
+        if (replica.id == replica.getCoordinatorID()) {
             state = State.COORDINATOR;
             scheduleHeartbeatTick();
         } else {
@@ -276,7 +276,7 @@ public final class HeartbeatTransaction extends Transaction {
             return;
         }
 
-        if (heartbeat.coordinatorId != replica.coordinatorID) {
+        if (heartbeat.coordinatorId != replica.getCoordinatorID()) {
             return;
         }
 
