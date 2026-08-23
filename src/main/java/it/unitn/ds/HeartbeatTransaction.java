@@ -162,7 +162,7 @@ public final class HeartbeatTransaction extends Transaction {
             return;
         }
 
-        if (replica.id == replica.coordinatorID) {
+        if (replica.id == replica.getCoordinatorID()) {
             state = State.COORDINATOR;
             scheduleHeartbeatTick();
         } else {
@@ -192,23 +192,8 @@ public final class HeartbeatTransaction extends Transaction {
      * mailbox and never crosses the network channel.
      */
     private void scheduleHeartbeatTick() {
-        timeout = replica.getContext()
-                         .system()
-                         .scheduler()
-                         .scheduleOnce(
-                            Duration.create(
-                                replica.getCoordinatorBeatInterval(),
-                                TimeUnit.MILLISECONDS
-                            ), 
-                            replica.getSelf(),
-                            new HeartbeatTickMsg(
-                                getId(),
-                                startEpochPair,
-                                replica.getSelf()
-                            ),
-                            replica.getContext().system().dispatcher(),
-                            replica.getSelf()    
-                        ); 
+        timeout = replica.scheduleToItself(replica.getCoordinatorBeatInterval(),
+                            new HeartbeatTickMsg(getId(), startEpochPair, replica.getSelf())); 
     }
 
 
@@ -222,23 +207,14 @@ public final class HeartbeatTransaction extends Transaction {
 
         watchdogVersion++;
 
-        timeout = replica.getContext()
-                         .system()
-                         .scheduler()
-                         .scheduleOnce(
-                            Duration.create(
-                                getWatchdogTimeoutMillis(),
-                                TimeUnit.MILLISECONDS      
-                            ),
-                            replica.getSelf(),
+        timeout = replica.scheduleToItself(
+                            getWatchdogTimeoutMillis(),
                             new WatchdogExpiredMsg(
                                 getId(),
                                 startEpochPair,
                                 replica.getSelf(),
                                 watchdogVersion
-                            ),
-                            replica.getContext().system().dispatcher(),
-                            replica.getSelf()
+                            )
                          );
     }
 
@@ -275,7 +251,7 @@ public final class HeartbeatTransaction extends Transaction {
             return;
         }
 
-        if (heartbeat.coordinatorId != replica.coordinatorID) {
+        if (heartbeat.coordinatorId != replica.getCoordinatorID()) {
             return;
         }
 

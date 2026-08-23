@@ -1,11 +1,9 @@
 package it.unitn.ds;
 
-import java.util.concurrent.TimeUnit;
 
 import akka.actor.ActorRef;
 import it.unitn.ds.AbstractClient.WriteResult;
 import it.unitn.ds.AbstractClient.WriteTimeout;
-import scala.concurrent.duration.Duration;
 
 public class WriteTransaction extends Transaction {
 
@@ -116,13 +114,10 @@ public class WriteTransaction extends Transaction {
             Client client = (Client) this.owner;
             client.unicast(startParameters.initialMsg, startParameters.targetActor);
             state = WriteTransactionState.WAITING_RESULT;
-            this.timeout = client.getContext().system().scheduler().scheduleOnce(
-               Duration.create(client.getWriteTimeoutDelay(), TimeUnit.MILLISECONDS), 
-               client.getSelf(), 
-               new WriteTimeoutMsg(this.getId(), null, client.getSelf()), 
-               client.getContext().system().dispatcher(),
-               client.getSelf()
-            );
+            this.timeout = client.scheduleToItself(
+                                    client.getWriteTimeoutDelay(),
+                                    new WriteTimeoutMsg(this.getId(), null, client.getSelf())
+                                );
         } else if(this.owner instanceof Replica) {
             Replica replica = (Replica) this.owner;
             this.state = WriteTransactionState.WAITING_UPDATE;

@@ -2,6 +2,8 @@ package it.unitn.ds;
 
 import akka.actor.ActorRef;
 import akka.actor.Props;
+import it.unitn.ds.HeartbeatTransaction.HeartbeatMsg;
+import it.unitn.ds.HeartbeatTransaction.WatchdogExpiredMsg;
 import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.Transaction.TransactionId;
 import it.unitn.ds.UpdateTransaction.UpdateAckMsg;
@@ -11,6 +13,7 @@ import it.unitn.ds.UpdateTransaction.WriteOkMsg;
 import it.unitn.ds.UpdateTransaction.WriteOkTimeoutMsg;
 import it.unitn.ds.WriteTransaction.WriteFinishMsg;
 import it.unitn.ds.WriteTransaction.WriteMsg;
+
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -21,9 +24,10 @@ public class Replica extends AbstractReplica implements DistributedActor {
     private Map<Integer, ActorRef> groupOfReplicas;
     private List<Transaction> activeTransactions;
     private int transactionCounter;
+    private EpochPair epochPair;
 
     private int positions[];
-    int coordinatorID;
+    private int coordinatorID;
 
     ///////////// For crashing ////////////
     private enum CrashStatus {
@@ -55,8 +59,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
         // pendingCrash is left at its default null: no crash has been requested yet.
         this.replicaStatus = CrashStatus.NONE;
         this.crashCount = 0;
-        activeTransactions = new LinkedList<>();
-        transactionCounter = 0;
+        this.activeTransactions = new LinkedList<>();
+        this.transactionCounter = 0;
     }
 
     public static Props props(int id, int minLatency, int maxLatency, int coordinatorBeatInterval) {
@@ -107,7 +111,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
         if (this.replicaStatus == CrashStatus.CRASHED) {
             return;
         }
-
+        
         ActorRef target;
         for (Map.Entry<Integer, ActorRef> entry : groupOfReplicas.entrySet()) {
             target = entry.getValue();
@@ -115,6 +119,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
                 this.tell(msg, target);
             }
         }
+        updateCrashStatusCallback(msg);
     }
 
     /**
@@ -142,6 +147,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
             return;
         }
         this.tell(msg, target);
+        updateCrashStatusCallback(msg);
     }
 
     /**
@@ -170,7 +176,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.heartbeatTransaction = new HeartbeatTransaction(
             getNextTransactionId(),
             this,
-            null
+            getEpochPair()
         );
 
         scheduleTransaction(this.heartbeatTransaction);
@@ -206,48 +212,45 @@ public class Replica extends AbstractReplica implements DistributedActor {
         debug("Transaction completed: " + transaction.getId());
     }
 
-    /**
-     * Processes a coordinator's internal scheduled tick.
-     */
-    private void onHeartbeatTick(HeartbeatTransaction.HeartbeatTickMsg tick) {
-        if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
-            return;
-        }
-
-        onMessage(tick);
-
-        updateCrashStatusCallback(AbstractReplica.Crash.Type.Heartbeat);
-    }
-
-    /**
-     * Process a network heartbeat received by a follower.
-     */
-    private void onHeartbeat(HeartbeatTransaction.HeartbeatMsg heartbeat) {
-        if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
-            return;
-        }
-
-        onMessage(heartbeat);
-
-        updateCrashStatusCallback(AbstractReplica.Crash.Type.Heartbeat);
-    }
-
-    /**
-     * Processes the follower's internal watchdog event.
-     */
-    private void onWatchdogExpired(HeartbeatTransaction.WatchdogExpiredMsg expired) {
-        if (replicaStatus == CrashStatus.CRASHED || heartbeatTransaction == null) {
-            return;
-        }
-
-        onMessage(expired);
-    }
-
     @Override
     public TransactionId getNextTransactionId() {
         TransactionId id = new TransactionId(this.getSelf(), transactionCounter);
         ++transactionCounter;
         return id;
+    }
+
+    /**
+     * Returns the coordinator ID of the replica.
+     * @return The coordinator ID of the replica.
+     */
+    public int getCoordinatorID() {
+        return this.coordinatorID;
+    }
+
+    /**
+     * Sets the coordinator ID of the replica.
+     * @param coordinatorID The new coordinator ID to be set.
+     */
+    public void setCoordinatorID(int coordinatorID) {
+        this.coordinatorID = coordinatorID;
+    }
+
+    public EpochPair getEpochPair() {
+        return this.epochPair;
+    }
+
+    public void setEpochPair(EpochPair epochPair) throws IllegalArgumentException {
+        if (epochPair == null) {
+            throw new IllegalArgumentException("EpochPair cannot be null");
+        }
+        if (this.epochPair == null) {
+            this.epochPair = epochPair;
+            return;
+        }
+        if (this.epochPair.compareTo(epochPair) > 0) {
+            throw new IllegalArgumentException("New epochPair must be greater than or equal to the current epochPair");
+        }
+        this.epochPair = epochPair;
     }
 
     @Override
@@ -263,27 +266,12 @@ public class Replica extends AbstractReplica implements DistributedActor {
                 WriteMsg.class, 
                 this::onWriteMsg
             )
-            .match(
-                WriteFinishMsg.class, 
-                this::onMessage
-            )
-            .match(
-                HeartbeatTransaction.HeartbeatTickMsg.class,
-                this::onHeartbeatTick
-            )
-            .match(
-                HeartbeatTransaction.HeartbeatMsg.class,
-                this::onHeartbeat
-            )
-            .match(
-                HeartbeatTransaction.WatchdogExpiredMsg.class,
-                this::onWatchdogExpired
-            )
             // Handle TestMsg messages, leave it as last
             .match(
                 ProbeMsg.class,
                 this::onProbeMsg
             )
+            .matchAny(msg -> defaultDispatcher(msg))
             .build();
     }
 
@@ -292,20 +280,24 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * @param msg Incoming message to be processed by the appropriate Transaction.
      */
     public void onMessage(Msg msg) {
+        boolean delivered = false;
         if(this.replicaStatus == CrashStatus.CRASHED){
             return;
         }
         for (Transaction transaction : activeTransactions) {
             if (transaction.getId().equals(msg.transactionId)) {
                 transaction.computeState(msg);
-                return;
+                delivered = true;
+                break;
             }
+        }
+        if(delivered){
+            updateCrashStatusCallback(msg);
         }
     }
     
     public void onWriteMsg(WriteMsg msg) {
-        // TODO: when the method will be implemented, change the null with the current EpochPair of the replica
-        WriteTransaction transaction = new WriteTransaction(msg.transactionId, this, null, msg.index, msg.value, msg.sender);
+        WriteTransaction transaction = new WriteTransaction(msg.transactionId, this, getEpochPair(), msg.index, msg.value, msg.sender);
         scheduleTransaction(transaction);
     }
         
@@ -323,26 +315,42 @@ public class Replica extends AbstractReplica implements DistributedActor {
     /// For testing
     public void onProbeMsg(ProbeMsg msg) {
         if (ProbeTransaction.MSG_START.equals(msg.content)) {
-            ProbeTransaction transaction = new ProbeTransaction(msg.transactionId, this, msg.epochPair, msg, msg.sender);
+            ProbeTransaction transaction =
+                    new ProbeTransaction(msg.transactionId, this, msg.epochPair, msg, msg.sender);
             scheduleTransaction(transaction);
         } else {
             onMessage(msg);
         }
     }
 
+    void defaultDispatcher(Object msg) {
+        if (msg instanceof Msg) {
+            onMessage((Msg) msg);
+        }
+    }
+
     /**
-     * This callback method is invoked whenever a message is recieved by the replica and the parameter allows to differentiate the type of message.
+     * This callback method is invoked whenever a message is received by the replica and the parameter allows to differentiate the type of message.
      * The callback then checks if the replica is in a pending crash state and if the type of message matches the pending crash type.
      * If so, it increments the crash count and checks if it has reached the threshold for crashing.
      * If the threshold is met, the replica's status is updated to CRASHED.
      * @param crashType Enum representing the type of message received, used to determine if the replica should crash and if to increment the crash count.
      */
-    void updateCrashStatusCallback(AbstractReplica.Crash.Type crashType) {
-        if (this.replicaStatus == CrashStatus.PENDING && this.pendingCrash.type == crashType) {
-            this.crashCount++;
-            if (this.crashCount >= this.pendingCrash.after_n_messages_of_type) {
-                this.replicaStatus = CrashStatus.CRASHED;
-                log("Replica crashed due to " + crashType + " crash.");
+    void updateCrashStatusCallback(Msg msg) {
+        if (this.replicaStatus == CrashStatus.PENDING) {
+            boolean shouldIncrementCrashCount = false;
+            shouldIncrementCrashCount = switch (msg) {
+                case HeartbeatMsg _, WatchdogExpiredMsg _ -> this.pendingCrash.type == Crash.Type.Heartbeat;
+                case WriteFinishMsg _ -> this.pendingCrash.type == Crash.Type.WriteOK;
+                default -> false;
+            };
+
+            if(shouldIncrementCrashCount){
+                this.crashCount++;
+                if (this.crashCount >= this.pendingCrash.after_n_messages_of_type) {
+                    this.replicaStatus = CrashStatus.CRASHED;
+                    log("Replica crashed due to " + this.pendingCrash.type + " crash.");
+                }
             }
         }
     }
