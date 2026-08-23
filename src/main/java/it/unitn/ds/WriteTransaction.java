@@ -122,9 +122,7 @@ public class WriteTransaction extends Transaction {
             client.unicast(startParameters.initialMsg, startParameters.targetActor);
             state = WriteTransactionState.WAITING_RESULT;
             this.timeout = client.scheduleToItself(
-                                    client.getWriteTimeoutDelay(),
-                                    new WriteTimeoutMsg(this.getId(), null, client.getSelf())
-                                );
+                    client.getWriteTimeoutDelay(), new WriteTimeoutMsg(this.getId(), null, client.getSelf()));
         }
         // // TODO: Create a new UpdateTransaction for the replica to handle the update
         // else if(this.owner instanceof Replica) {

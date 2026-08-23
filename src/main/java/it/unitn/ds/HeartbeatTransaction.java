@@ -124,7 +124,7 @@ public final class HeartbeatTransaction extends Transaction {
      * Returns the owning Replica with its concrete type.
      */
     private Replica getReplica() {
-        if(!(owner instanceof Replica)) {
+        if (!(owner instanceof Replica)) {
             throw new IllegalStateException("HeartbeatTransaction owner is not a Replica");
         }
         return (Replica) owner;
@@ -170,8 +170,11 @@ public final class HeartbeatTransaction extends Transaction {
      * mailbox and never crosses the network channel.
      */
     private void scheduleHeartbeatTick() {
-        timeout = getReplica().scheduleToItself(getReplica().getCoordinatorBeatInterval(),
-                            new HeartbeatTickMsg(getId(), startEpochPair, getReplica().getSelf())); 
+        timeout = getReplica()
+                .scheduleToItself(
+                        getReplica().getCoordinatorBeatInterval(),
+                        new HeartbeatTickMsg(
+                                getId(), startEpochPair, getReplica().getSelf()));
     }
 
     /**
@@ -184,15 +187,11 @@ public final class HeartbeatTransaction extends Transaction {
 
         watchdogVersion++;
 
-        timeout = getReplica().scheduleToItself(
-                            getWatchdogTimeoutMillis(),
-                            new WatchdogExpiredMsg(
-                                getId(),
-                                startEpochPair,
-                                getReplica().getSelf(),
-                                watchdogVersion
-                            )
-                         );
+        timeout = getReplica()
+                .scheduleToItself(
+                        getWatchdogTimeoutMillis(),
+                        new WatchdogExpiredMsg(
+                                getId(), startEpochPair, getReplica().getSelf(), watchdogVersion));
     }
 
     /**
@@ -205,7 +204,9 @@ public final class HeartbeatTransaction extends Transaction {
             return;
         }
 
-        getReplica().broadcast(new HeartbeatMsg(getId(), startEpochPair, getReplica().getSelf(), getReplica().id));
+        getReplica()
+                .broadcast(
+                        new HeartbeatMsg(getId(), startEpochPair, getReplica().getSelf(), getReplica().id));
         scheduleHeartbeatTick();
     }
 

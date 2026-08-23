@@ -4,7 +4,6 @@ import akka.actor.ActorRef;
 import akka.actor.Cancellable;
 import java.io.Serializable;
 
-
 public abstract class Transaction {
 
     protected Cancellable timeout;

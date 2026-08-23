@@ -8,7 +8,6 @@ import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.Transaction.TransactionId;
 import it.unitn.ds.WriteTransaction.WriteFinishMsg;
 import it.unitn.ds.WriteTransaction.WriteMsg;
-
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -103,7 +102,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
         if (this.replicaStatus == CrashStatus.CRASHED) {
             return;
         }
-        
+
         ActorRef target;
         for (Map.Entry<Integer, ActorRef> entry : groupOfReplicas.entrySet()) {
             target = entry.getValue();
@@ -237,17 +236,11 @@ public class Replica extends AbstractReplica implements DistributedActor {
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
-            .match(
-                WriteMsg.class, 
-                this::onWriteMsg
-            )
-            // Handle TestMsg messages, leave it as last
-            .match(
-                ProbeMsg.class,
-                this::onProbeMsg
-            )
-            .matchAny(msg -> defaultDispatcher(msg))
-            .build();
+                .match(WriteMsg.class, this::onWriteMsg)
+                // Handle TestMsg messages, leave it as last
+                .match(ProbeMsg.class, this::onProbeMsg)
+                .matchAny(msg -> defaultDispatcher(msg))
+                .build();
     }
 
     /**
@@ -266,13 +259,14 @@ public class Replica extends AbstractReplica implements DistributedActor {
                 break;
             }
         }
-        if(delivered){
+        if (delivered) {
             updateCrashStatusCallback(msg);
         }
     }
 
     public void onWriteMsg(WriteMsg msg) {
-        WriteTransaction transaction = new WriteTransaction(msg.transactionId, this, getEpochPair(), msg.index, msg.value, msg.sender);
+        WriteTransaction transaction =
+                new WriteTransaction(msg.transactionId, this, getEpochPair(), msg.index, msg.value, msg.sender);
         scheduleTransaction(transaction);
     }
 
@@ -302,13 +296,14 @@ public class Replica extends AbstractReplica implements DistributedActor {
      */
     void updateCrashStatusCallback(Msg msg) {
         if (this.replicaStatus == CrashStatus.PENDING) {
-            boolean shouldIncrementCrashCount = switch (msg) {
-                case HeartbeatMsg _, WatchdogExpiredMsg _ -> this.pendingCrash.type == Crash.Type.Heartbeat;
-                case WriteFinishMsg _ -> this.pendingCrash.type == Crash.Type.WriteOK;
-                default -> false;
-            };
+            boolean shouldIncrementCrashCount =
+                    switch (msg) {
+                        case HeartbeatMsg _, WatchdogExpiredMsg _ -> this.pendingCrash.type == Crash.Type.Heartbeat;
+                        case WriteFinishMsg _ -> this.pendingCrash.type == Crash.Type.WriteOK;
+                        default -> false;
+                    };
 
-            if(shouldIncrementCrashCount){
+            if (shouldIncrementCrashCount) {
                 this.crashCount++;
                 if (this.crashCount >= this.pendingCrash.after_n_messages_of_type) {
                     this.replicaStatus = CrashStatus.CRASHED;
