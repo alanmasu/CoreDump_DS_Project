@@ -302,8 +302,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
      */
     void updateCrashStatusCallback(Msg msg) {
         if (this.replicaStatus == CrashStatus.PENDING) {
-            boolean shouldIncrementCrashCount = false;
-            shouldIncrementCrashCount = switch (msg) {
+            boolean shouldIncrementCrashCount = switch (msg) {
                 case HeartbeatMsg _, WatchdogExpiredMsg _ -> this.pendingCrash.type == Crash.Type.Heartbeat;
                 case WriteFinishMsg _ -> this.pendingCrash.type == Crash.Type.WriteOK;
                 default -> false;

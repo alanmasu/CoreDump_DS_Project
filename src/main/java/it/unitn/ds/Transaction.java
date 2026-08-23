@@ -3,8 +3,7 @@ package it.unitn.ds;
 import akka.actor.ActorRef;
 import akka.actor.Cancellable;
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.List;
+
 
 public abstract class Transaction {
 
@@ -12,13 +11,11 @@ public abstract class Transaction {
     protected final DistributedActor owner;
     protected final EpochPair startEpochPair;
     private final TransactionId id;
-    protected final List<Msg> history;
 
     public Transaction(TransactionId id, DistributedActor owner, EpochPair startEpochPair) {
         this.owner = owner;
         this.id = id;
         this.startEpochPair = startEpochPair;
-        this.history = new ArrayList<>();
     }
 
     /**

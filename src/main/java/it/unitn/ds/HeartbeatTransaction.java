@@ -1,8 +1,6 @@
 package it.unitn.ds;
 
 import akka.actor.ActorRef;
-import java.util.concurrent.TimeUnit;
-import scala.concurrent.duration.Duration;
 
 /**
  * Manages heartbeat behavior for a Replica.
