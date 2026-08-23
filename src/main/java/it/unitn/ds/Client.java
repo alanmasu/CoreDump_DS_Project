@@ -12,8 +12,8 @@ public class Client extends AbstractClient implements DistributedActor {
 
     private int transactionCounter;
 
-    Queue<Transaction> scheduledTransactions;
-    Transaction currentTransaction;
+    private Queue<Transaction> scheduledTransactions;
+    private Transaction currentTransaction;
 
     Client(
             long readTimeoutDelay,
@@ -75,6 +75,7 @@ public class Client extends AbstractClient implements DistributedActor {
                 .match(WriteTransaction.WriteResultMsg.class, this::onMessage)
                 // Handle TestMsg messages, leave it as last
                 .match(ProbeMsg.class, this::onProbeMsg)
+                .matchAny(msg -> defaultDispatcher(msg))
                 .build();
     }
 
@@ -110,11 +111,17 @@ public class Client extends AbstractClient implements DistributedActor {
         }
     }
 
+    void defaultDispatcher(Object msg) {
+        if (msg instanceof Msg) {
+            onMessage((Msg) msg);
+        }
+    }
+
     /// For testing
     public void onProbeMsg(ProbeMsg msg) {
         if (ProbeTransaction.MSG_START.equals(msg.content)) {
             // TODO: Pass the correct startEpochPair to the ProbeTransaction constructor
-            ProbeTransaction transaction = new ProbeTransaction(msg.transactionId, this, null,  msg, msg.sender);
+            ProbeTransaction transaction = new ProbeTransaction(msg.transactionId, this, null, msg, msg.sender);
             scheduleTransaction(transaction);
         } else {
             onMessage(msg);
