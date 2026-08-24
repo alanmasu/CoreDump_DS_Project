@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
 
 class TestUpdateTransaction {
 
-    static final int NODES_N = 3;
+    static final int NODES_N = 5;
     static final int COORDINATOR_ID = 0;
     static final Crash CRASH_NOW = new Crash(Crash.Type.Now, 0);
     TestsSystemWrapper sys;
@@ -58,8 +58,6 @@ class TestUpdateTransaction {
         Logger.setDestinationStdout();
         Logger.setDebugEnabled(true);
         Logger.setLoggingEnabled(true);
-        System.out.println("getClientWriteTimeout: "
-                + TestsCommons.getClientWriteTimeout(AbstractReplica.MAX_LATENCY, sys.getNNodes()));
     }
 
     void startWriteTransaction(int index, int value) {
