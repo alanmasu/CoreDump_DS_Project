@@ -129,11 +129,14 @@ spotbugsTest {
 // to know when to clear the previous diagnostics: Gradle's own "> Task :x" lines cannot be
 // trusted for this, because the rich console groups output and can emit a task's header
 // after the findings it produced.
+// Turns a tool-relative path into one an editor can open.
+def sourceRoots = (sourceSets.main.java.srcDirs + sourceSets.test.java.srcDirs).toList()
+
 def analysisBegin = tasks.register('analysisBegin') {
     doLast { println '=== analysis: begin ===' }
 }
 
-tasks.matching { it.name in ['pmdMain', 'pmdTest', 'spotbugsMain', 'spotbugsTest', 'cpd'] }.configureEach {
+tasks.matching { it.name in ['pmdMain', 'pmdTest', 'spotbugsMain', 'spotbugsTest', 'cpd', 'spotlessJava'] }.configureEach {
     mustRunAfter analysisBegin
 }
 
@@ -141,60 +144,69 @@ tasks.register('staticAnalysis') {
     description = 'Runs PMD and SpotBugs over main and test sources, with editor-clickable output'
     group = 'verification'
 
-    dependsOn analysisBegin, 'pmdMain', 'pmdTest', 'spotbugsMain', 'spotbugsTest', 'cpd'
+    dependsOn analysisBegin, 'pmdMain', 'pmdTest', 'spotbugsMain', 'spotbugsTest', 'cpd', 'spotlessJava'
 
     def reports = layout.buildDirectory.dir('reports')
-    def sourceRoots = (sourceSets.main.java.srcDirs + sourceSets.test.java.srcDirs).toList()
 
     doLast {
-        ['main', 'test'].each { sourceSet ->
-            def sarif = reports.get().file("spotbugs/${sourceSet}.sarif").asFile
-            if (!sarif.exists()) {
-                return
-            }
-            new groovy.json.JsonSlurper().parse(sarif).runs[0].results.each { r ->
-                def loc = r.locations[0].physicalLocation
-                // SARIF paths are relative to the source root ("it/unitn/ds/Foo.java"),
-                // which no editor can resolve on its own.
-                def uri = loc.artifactLocation.uri
-                def resolved = sourceRoots.collect { new File(it, uri) }.find { it.exists() }
-                // Class-level findings (an unused field) carry no region: use line 1.
-                def line = loc.region?.startLine ?: 1
-                println "${resolved ? resolved.absolutePath : uri}:${line}:\t${r.ruleId}:\t${r.message.text}"
-            }
-        }
-
         // Severities are the tools' own: PMD priority 1-2 / 3 / 4-5, SpotBugs SARIF level.
         // The problem matcher flattens everything to "warning", so this is the only place
         // the distinction survives.
         def counts = [error: 0, warning: 0, info: 0]
 
-        ['main', 'test'].each { sourceSet ->
-            def pmdXml = reports.get().file("pmd/${sourceSet}.xml").asFile
+        ['main', 'test'].each { set ->
+            // PMD prints its own findings; only its counts are needed here.
+            def pmdXml = reports.get().file("pmd/${set}.xml").asFile
             if (pmdXml.exists()) {
                 new groovy.xml.XmlSlurper().parse(pmdXml).file.violation.each { v ->
-                    def priority = v.@priority.toInteger()
-                    counts[priority <= 2 ? 'error' : (priority == 3 ? 'warning' : 'info')]++
+                    def p = v.@priority.toInteger()
+                    counts[p <= 2 ? 'error' : (p == 3 ? 'warning' : 'info')]++
                 }
             }
-            def sarif = reports.get().file("spotbugs/${sourceSet}.sarif").asFile
+
+            // SpotBugs cannot print, so its SARIF is re-emitted in PMD's format.
+            def sarif = reports.get().file("spotbugs/${set}.sarif").asFile
             if (sarif.exists()) {
                 new groovy.json.JsonSlurper().parse(sarif).runs[0].results.each { r ->
+                    def loc = r.locations[0].physicalLocation
+                    // SARIF paths are relative to the source root ("it/unitn/ds/Foo.java"),
+                    // which no editor can resolve; class-level findings carry no region.
+                    def file = sourceRoots.collect { new File(it, loc.artifactLocation.uri) }.find { it.exists() }
+                    println "${file ?: loc.artifactLocation.uri}:${loc.region?.startLine ?: 1}:\t${r.ruleId}:\t${r.message.text}"
                     counts[[error: 'error', warning: 'warning'].get(r.level, 'info')]++
                 }
             }
         }
 
-        // Counted per location, not per block: CPD reports one line for each end of a
+        // Formatting is reported, not enforced: spotlessJava writes the formatted version
+        // of each file under build/spotless-clean without failing, unlike spotlessCheck,
+        // which would abort the task on the first offender and hide every other finding.
+        def cleanRoot = layout.buildDirectory.dir('spotless-clean/spotlessJava').get().asFile
+        def unformatted = 0
+        cleanRoot.eachFileRecurse { formatted ->
+            def original = new File(projectDir, cleanRoot.toPath().relativize(formatted.toPath()).toString())
+            if (!formatted.name.endsWith('.java') || !original.isFile() || original.text == formatted.text) {
+                return
+            }
+            // Anchor on the first differing line, so the marker lands where the reformat
+            // starts rather than on line 1.
+            def a = original.readLines()
+            def b = formatted.readLines()
+            def i = (0..<Math.max(a.size(), b.size())).find { it >= a.size() || it >= b.size() || a[it] != b[it] }
+            unformatted++
+            println "${original.absolutePath}:${(i ?: 0) + 1}:\tFormatting:\tnot formatted, run ./gradlew spotlessApply"
+        }
+
+        // Counted per location, not per block: CPD reports one line per end of a
         // duplication, so this is what actually lands in the Problems panel.
         def cpdXml = reports.get().file('cpd/cpd.xml').asFile
         def duplications = cpdXml.exists()
                 ? new groovy.xml.XmlSlurper().parse(cpdXml).duplication.collect { it.file.size() }.sum() ?: 0
                 : 0
 
-        def total = counts.values().sum() + duplications
+        def total = counts.values().sum() + duplications + unformatted
         println "Errors: ${counts.error}   Warnings: ${counts.warning}   Info: ${counts.info}   " +
-                "Duplications: ${duplications}   (${total} problems)"
+                "Duplications: ${duplications}   Formatting: ${unformatted}   (${total} problems)"
         println '=== analysis: end ==='
     }
 }
@@ -244,9 +256,13 @@ tasks.register('cpd', JavaExec) {
 }
 
 // --- Formatting --------------------------------------------------------------
-// Spotless rewrites rather than reports: `spotlessApply` fixes, `spotlessCheck` verifies.
-// enforceCheck is off so that `check` does not fail on formatting until you have run
-// spotlessApply once and committed the resulting (large) diff.
+// `spotlessApply` rewrites. There is no check task: staticAnalysis already reports
+// unformatted files as findings, and a second path that fails the build instead would
+// only get in the way.
+
+tasks.matching { it.name in ['spotlessCheck', 'spotlessJavaCheck'] }.configureEach {
+    enabled = false
+}
 
 spotless {
     enforceCheck = false
@@ -282,8 +298,6 @@ tasks.register('callbackContract', Test) {
 // in the format above reuses the same problem matcher.
 
 tasks.withType(Test).configureEach {
-    def sourceRoots = (sourceSets.main.java.srcDirs + sourceSets.test.java.srcDirs).toList()
-
     afterTest { desc, result ->
         result.exceptions.each { e ->
             def frame = e.stackTrace.find { it.className.startsWith('it.unitn.ds') && it.lineNumber > 0 }
@@ -332,30 +346,42 @@ tasks.register('regression', Test) {
 
 // --- Coverage ----------------------------------------------------------------
 // Belongs with the tests: it runs them, it does not analyse sources.
+// One report per suite, each covering only what that suite executed.
 
 jacoco {
     toolVersion = '0.8.15'
 }
 
-tasks.named('jacocoTestReport') {
-    // Driven by `regression`, not `test`: the base suite is slow and currently red.
-    // Any Test task that has already run contributes its data.
-    dependsOn 'regression'
-    executionData fileTree(layout.buildDirectory).include('jacoco/*.exec')
-    reports {
-        html.required = true
-        xml.required = false
+// Pinned to 0.8.15: earlier versions cannot instrument Java 25 class files.
+['test', 'regression'].each { suite ->
+    tasks.register("${suite}Coverage", JacocoReport) {
+        description = "Coverage of the ${suite} suite"
+        group = 'verification'
+
+        dependsOn suite
+        // The Test task's own .exec, so each report covers only that suite.
+        executionData layout.buildDirectory.file("jacoco/${suite}.exec")
+        sourceSets sourceSets.main
+        reports {
+            html.required = true
+            xml.required = false
+        }
+        // Course template: infrastructure we neither wrote nor test.
+        classDirectories.setFrom(files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: ['it/unitn/ds/Abstract*', 'it/unitn/ds/Logger*',
+                                        'it/unitn/ds/NetworkChannel*', 'it/unitn/ds/Main*'])
+        }))
+
+        // Absolute path so the terminal linkifies it: the report is the whole point of
+        // the task, and hunting for it under build/ every time is a waste.
+        doLast {
+            def index = new File(reports.html.outputLocation.get().asFile, 'index.html')
+            println "Coverage report: ${index.absolutePath}"
+        }
     }
-    // Course template: infrastructure we neither wrote nor test.
-    classDirectories.setFrom(files(classDirectories.files.collect {
-        fileTree(dir: it, exclude: [
-            'it/unitn/ds/Abstract*',
-            'it/unitn/ds/Logger*',
-            'it/unitn/ds/NetworkChannel*',
-            'it/unitn/ds/Main*'
-        ])
-    }))
 }
+
+tasks.named('jacocoTestReport') { enabled = false }   // superseded by testCoverage
 
 javadoc {
     // 1. Add the test sources to the documentation generator

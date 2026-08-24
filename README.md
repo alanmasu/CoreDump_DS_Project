@@ -69,8 +69,11 @@ public void testClientReadRequest() {
 ## Test Coverage
 
 ```bash
-./gradlew jacocoTestReport      # then open build/reports/jacoco/test/html/index.html
+./gradlew regressionCoverage    # our own tests only — fast
+./gradlew testCoverage          # everything: base suite + regression — slow
 ```
+
+Each task prints the path of its report when it finishes.
 
 JaCoCo instruments the bytecode and records which lines and branches the tests actually
 execute. It finds no bugs: it tells you **where you have not looked**. On a protocol with
@@ -78,8 +81,10 @@ crashes and message reordering the uncovered lines are the error paths, which is
 where bugs survive — so the report is a way to choose which test to write next instead of
 guessing.
 
-The report is driven by `regression`, not `test`: the base suite is slow and currently
-failing. Any other `Test` task that has already run contributes its data too.
+`testCoverage` is the complete picture: `test` has no package filter, so it runs the base
+suite *and* our regression tests. `regressionCoverage` is the fast subset, and the one for
+day to day — `testCoverage` takes about ten minutes because the base suite waits out its
+election timeouts.
 
 `AbstractClient`, `AbstractReplica`, `Logger`, `NetworkChannel` and `Main` are excluded:
 they come from the course template, and measuring our coverage of somebody else's
@@ -98,7 +103,7 @@ The build integrates five tools, each answering a question the others cannot:
 | **SpotBugs** | Bytecode dataflow: probable bugs, thread visibility, overflow |
 | **CPD** | Duplicated blocks (token-based, survives renames) |
 | **ArchUnit** | Architectural rules, expressed as tests |
-| **Spotless** | Formatting — rewrites rather than reports |
+| **Spotless** | Formatting — `spotlessApply` rewrites, `staticAnalysis` reports |
 
 PMD and SpotBugs run with `ignoreFailures = true`: they report findings but never turn the
 build red. Tighten that once the counts are low enough to be sustainable.
@@ -111,17 +116,25 @@ unactionable; `pmdTest` and `spotbugsTest` are restricted to `it.unitn.ds.regres
 ### Running the analysis
 
 ```bash
-./gradlew staticAnalysis      # PMD + SpotBugs + CPD, editor-clickable — the daily one
+./gradlew staticAnalysis      # PMD + SpotBugs + CPD + formatting — the daily one
 ./gradlew cpd                 # duplication only
 ./gradlew callbackContract    # the callback checklist (see below)
 ./gradlew spotlessApply       # reformat
 ./gradlew check               # tests + PMD + SpotBugs; slow
 ```
 
-`staticAnalysis` runs all three analysers and prints every finding as
+`staticAnalysis` runs every analyser and prints each finding as
 `<file>:<line>: <RULE>: <message>`, which most terminals and editors turn into a clickable
-link. Duplications get one line per end of the block, so both are navigable. The run closes
-with a count by severity.
+link. Duplications get one line per end of the block, so both are navigable; unformatted
+files are anchored on the first line that differs. The run closes with a count:
+
+```
+Errors: 0   Warnings: 0   Info: 0   Duplications: 0   Formatting: 0   (0 problems)
+```
+
+Errors, warnings and info come from the tools' own severities. Duplications and formatting
+are counted apart — they are not rule violations, but they are still entries in the
+Problems panel, so they are in the total.
 
 Reports on disk:
 
@@ -130,7 +143,7 @@ Reports on disk:
 | `build/reports/pmd/` | HTML + XML |
 | `build/reports/spotbugs/` | HTML + SARIF |
 | `build/reports/cpd/cpd.xml` | Duplications |
-| `build/reports/jacoco/test/html/` | Coverage |
+| `build/reports/jacoco/<task>/html/` | Coverage |
 
 PMD and SpotBugs always re-run rather than going `UP-TO-DATE`. An up-to-date task prints
 nothing, which an editor reads as "no findings" and uses to clear the Problems panel — a
@@ -157,14 +170,17 @@ reads. Run `./gradlew callbackContract` deliberately, towards the end of develop
 
 ```bash
 ./gradlew spotlessApply     # rewrites the files — run it before committing
-./gradlew spotlessCheck     # verifies only
 ```
 
 It reformats, drops unused imports, trims trailing whitespace and adds the final newline.
 
+There is no check task: `spotlessCheck` is disabled, because `staticAnalysis` already
+reports unformatted files as findings. A second path that fails the build instead of
+reporting would only get in the way.
+
 ### VS Code integration
 
-`.vscode/tasks.json` defines four tasks. Each one attaches a **problem matcher**, which is
+`.vscode/tasks.json` defines six tasks. Each one attaches a **problem matcher**, which is
 what makes findings appear as **squiggles on the offending line**, with the message on
 hover, an entry in the Problems panel, and `F8` / `Shift+F8` to jump between them. You
 never have to read the terminal.
@@ -175,8 +191,8 @@ never have to read the terminal.
 | **Static analysis (watch)** | Same, re-run automatically on every save |
 | **Run tests** | `./gradlew test`; failures become errors on the failing assertion |
 | **Run regression tests** | Same for the regression suite |
-
 | **Duplicated code (CPD)** | Duplications become hints on both ends of each block |
+| **Clear analysis problems** | Empties the Problems panel without re-running anything |
 
 `callbackContract` has no VS Code task: its output is a checklist to read, not a set of
 locations to jump between.

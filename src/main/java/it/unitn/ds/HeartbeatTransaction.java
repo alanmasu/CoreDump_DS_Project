@@ -1,14 +1,10 @@
 package it.unitn.ds;
 
-import scala.concurrent.duration.Duration;
-import java.util.concurrent.TimeUnit;
-import it.unitn.ds.Transaction.TransactionId;
-
 import akka.actor.ActorRef;
 
 /**
  * Manages heartbeat behavior for a Replica.
- * 
+ *
  * When the owner is the coordinator, it periodically broadcasts HEARTBEAT
  * messages. When the owner is a follower, it watches for those messages and
  * requests an election if the coordinator stops sending them, thus detecting
@@ -16,12 +12,11 @@ import akka.actor.ActorRef;
  */
 public final class HeartbeatTransaction extends Transaction {
 
-    
     private static final int MISSED_HEARTBEATS_BEFORE_FAILURE = 3;
 
     // Finite state machine states
     private enum State {
-        STOPPED, 
+        STOPPED,
         COORDINATOR,
         WATCHING,
         ELECTION_REQUESTED
@@ -36,7 +31,6 @@ public final class HeartbeatTransaction extends Transaction {
      * heartbeat transaction for the current coordinator term.</p>
      */
     public static final class HeartbeatTickMsg extends Msg {
-        
 
         /**
          * Creates a heartbeat tick for the given heartbeat transaction.
@@ -45,15 +39,10 @@ public final class HeartbeatTransaction extends Transaction {
          * @param epochPair epoch pair associated with the heartbeat transaction
          * @param sender coordinator Replica that scheduled the tick
          */
-        public HeartbeatTickMsg(
-            TransactionId transactionId,
-            EpochPair epochPair,
-            ActorRef sender
-        ) {
+        public HeartbeatTickMsg(TransactionId transactionId, EpochPair epochPair, ActorRef sender) {
             super(transactionId, epochPair, sender);
         }
     }
-
 
     /**
      * Network message broadcast by the coordinator to announce that it is alive.
@@ -63,7 +52,7 @@ public final class HeartbeatTransaction extends Transaction {
      * {@code coordinatorId} matches their currently expected coordinator.</p>
      */
     public static final class HeartbeatMsg extends Msg {
-        
+
         public final int coordinatorId;
 
         /**
@@ -74,17 +63,11 @@ public final class HeartbeatTransaction extends Transaction {
          * @param sender coordinator Replica broadcasting the heartbeat
          * @param coordinatorId numeric identifier of the current coordinator
          */
-        public HeartbeatMsg(
-            TransactionId transactionId,
-            EpochPair epochPair,
-            ActorRef sender,
-            int coordinatorId
-        ) {
+        public HeartbeatMsg(TransactionId transactionId, EpochPair epochPair, ActorRef sender, int coordinatorId) {
             super(transactionId, epochPair, sender);
             this.coordinatorId = coordinatorId;
         }
     }
-
 
     /**
      * Internal scheduler message indicating that a follower's watchdog expired.
@@ -107,35 +90,21 @@ public final class HeartbeatTransaction extends Transaction {
          * @param watchdogVersion generation of the watchdog that expired
          */
         public WatchdogExpiredMsg(
-            TransactionId transactionId,
-            EpochPair epochPair,
-            ActorRef sender,
-            long watchdogVersion
-        ) {
+                TransactionId transactionId, EpochPair epochPair, ActorRef sender, long watchdogVersion) {
             super(transactionId, epochPair, sender);
             this.watchdogVersion = watchdogVersion;
         }
     }
 
-
     // The transaction always starts inactive
     private State state;
 
     /**
-     * The Replica whose heartbeat behavior this transaction manages.
-     * 
-     * Transaction.owner references the same object, but its type is AbstractActor.
-     * Keeping this typed reference gives us access to Replica-specific data.
-     */
-    private final Replica replica;
-
-    /**
      * Identifies the follower's currently active watchdog.
-     * 
+     *
      * It starts at zero and increases whenever a new watchdog is scheduled.
      */
     private long watchdogVersion;
-
 
     /**
      * Creates a heartbeat transaction owned by a replica.
@@ -147,23 +116,33 @@ public final class HeartbeatTransaction extends Transaction {
     public HeartbeatTransaction(TransactionId transactionId, Replica owner, EpochPair startEpochPair) {
         super(transactionId, owner, startEpochPair);
 
-        this.replica = owner;
         this.state = State.STOPPED;
         this.watchdogVersion = 0;
     }
 
     /**
+     * Returns the owning Replica with its concrete type.
+     */
+    private Replica getReplica() {
+        if (!(owner instanceof Replica)) {
+            throw new IllegalStateException("HeartbeatTransaction owner is not a Replica");
+        }
+        return (Replica) owner;
+    }
+
+    /**
      * Starts heartbeat behavior according to the role of the owning Replica.
-     * 
+     *
      * Repeated calls are ignored so that we cannot accidentally create multiple
      * heartbeat timers or watchdogs for the same transactions.
      */
+    @Override
     public void start() {
         if (state != State.STOPPED) {
             return;
         }
 
-        if (replica.id == replica.getCoordinatorID()) {
+        if (getReplica().id == getReplica().getCoordinatorID()) {
             state = State.COORDINATOR;
             scheduleHeartbeatTick();
         } else {
@@ -177,26 +156,26 @@ public final class HeartbeatTransaction extends Transaction {
      * the follower considers it crashed.
      */
     private long getWatchdogTimeoutMillis() {
-        long heartbeatAllowance = 
-            (long) MISSED_HEARTBEATS_BEFORE_FAILURE
-                * replica.getCoordinatorBeatInterval();
-        
-        return heartbeatAllowance + replica.getMaxLatencyPlusTolerance();
-    }
+        long heartbeatAllowance =
+                (long) MISSED_HEARTBEATS_BEFORE_FAILURE * getReplica().getCoordinatorBeatInterval();
 
+        return heartbeatAllowance + getReplica().getMaxLatencyPlusTolerance();
+    }
 
     /**
      * Schedules one HeartbeatTick for the coordinator Replica.
-     * 
+     *
      * The tick carries this transaction's ID so the Replica can route it back to
      * the correct heartbeat transaction. It is delivered locally to the Replica's
      * mailbox and never crosses the network channel.
      */
     private void scheduleHeartbeatTick() {
-        timeout = replica.scheduleToItself(replica.getCoordinatorBeatInterval(),
-                            new HeartbeatTickMsg(getId(), startEpochPair, replica.getSelf())); 
+        timeout = getReplica()
+                .scheduleToItself(
+                        getReplica().getCoordinatorBeatInterval(),
+                        new HeartbeatTickMsg(
+                                getId(), startEpochPair, getReplica().getSelf()));
     }
-
 
     /**
      * Cancels the old watchdog and schedules a new version.
@@ -208,15 +187,11 @@ public final class HeartbeatTransaction extends Transaction {
 
         watchdogVersion++;
 
-        timeout = replica.scheduleToItself(
-                            getWatchdogTimeoutMillis(),
-                            new WatchdogExpiredMsg(
-                                getId(),
-                                startEpochPair,
-                                replica.getSelf(),
-                                watchdogVersion
-                            )
-                         );
+        timeout = getReplica()
+                .scheduleToItself(
+                        getWatchdogTimeoutMillis(),
+                        new WatchdogExpiredMsg(
+                                getId(), startEpochPair, getReplica().getSelf(), watchdogVersion));
     }
 
     /**
@@ -229,17 +204,11 @@ public final class HeartbeatTransaction extends Transaction {
             return;
         }
 
-        replica.broadcast(
-            new HeartbeatMsg(
-                getId(),
-                startEpochPair,
-                replica.getSelf(),
-                replica.id
-            )
-        );
+        getReplica()
+                .broadcast(
+                        new HeartbeatMsg(getId(), startEpochPair, getReplica().getSelf(), getReplica().id));
         scheduleHeartbeatTick();
     }
-
 
     /**
      * Handles a heartbeat received by a follower.
@@ -252,13 +221,12 @@ public final class HeartbeatTransaction extends Transaction {
             return;
         }
 
-        if (heartbeat.coordinatorId != replica.getCoordinatorID()) {
+        if (heartbeat.coordinatorId != getReplica().getCoordinatorID()) {
             return;
         }
 
         restartWatchdog();
     }
-
 
     /**
      * Handles the expiration of a follower's watchdog.
@@ -284,10 +252,6 @@ public final class HeartbeatTransaction extends Transaction {
         }
 
         state = State.ELECTION_REQUESTED;
-
-        // The scheduled timeout has fired, so no active scheduled timeout remains.
-        timeout = null;
-
 
         // TODO: ELECTION_TRANSACTION must be started here once it's implemented
     }
@@ -315,8 +279,6 @@ public final class HeartbeatTransaction extends Transaction {
         }
 
         throw new IllegalArgumentException(
-            "Unsupported heartbeat message: "
-                + msg.getClass().getSimpleName()
-        );
+                "Unsupported heartbeat message: " + msg.getClass().getSimpleName());
     }
 }
