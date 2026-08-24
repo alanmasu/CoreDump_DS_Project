@@ -1,12 +1,10 @@
 package it.unitn.ds;
 
-
 import akka.actor.ActorRef;
 import it.unitn.ds.AbstractClient.WriteResult;
 import it.unitn.ds.AbstractClient.WriteTimeout;
 
 public class WriteTransaction extends Transaction {
-
 
     protected WriteTransactionState state;
     protected WriteTransactionStartParameters startParameters;
@@ -14,8 +12,13 @@ public class WriteTransaction extends Transaction {
     protected int value;
     protected ActorRef destination;
 
-
-    public WriteTransaction(TransactionId id, DistributedActor owner, EpochPair startEpochPair, int index, int value, ActorRef targetActor) {
+    public WriteTransaction(
+            TransactionId id,
+            DistributedActor owner,
+            EpochPair startEpochPair,
+            int index,
+            int value,
+            ActorRef targetActor) {
         super(id, owner, startEpochPair);
         this.state = WriteTransactionState.INIT;
         this.startParameters = new WriteTransactionStartParameters();
@@ -47,11 +50,12 @@ public class WriteTransaction extends Transaction {
         ActorRef targetActor;
     }
 
-    public static abstract class WriteTransactionMsg extends Msg {
+    public abstract static class WriteTransactionMsg extends Msg {
         public final int index;
         public final int value;
 
-        public WriteTransactionMsg(TransactionId transactionId, EpochPair epochPair, ActorRef sender, int index, int value) {
+        public WriteTransactionMsg(
+                TransactionId transactionId, EpochPair epochPair, ActorRef sender, int index, int value) {
             super(transactionId, epochPair, sender);
             this.index = index;
             this.value = value;
@@ -66,7 +70,14 @@ public class WriteTransaction extends Transaction {
 
     public static class WriteResultMsg extends WriteTransactionMsg {
         public final int replicaId;
-        public WriteResultMsg(TransactionId transactionId, EpochPair epochPair, ActorRef sender, int index, int value, int replicaId) {
+
+        public WriteResultMsg(
+                TransactionId transactionId,
+                EpochPair epochPair,
+                ActorRef sender,
+                int index,
+                int value,
+                int replicaId) {
             super(transactionId, epochPair, sender, index, value);
             this.replicaId = replicaId;
         }
@@ -83,7 +94,7 @@ public class WriteTransaction extends Transaction {
             super(transactionId, epochPair, sender);
         }
     }
-    
+
     ////////////////////////////////////////////
 
     ///////////// Overiden Methods /////////////
@@ -96,21 +107,20 @@ public class WriteTransaction extends Transaction {
 
     @Override
     public void computeState(Msg msg) {
-        if(this.owner instanceof Client) {
+        if (this.owner instanceof Client) {
             clientStateMachine(msg);
-        } else if(this.owner instanceof Replica) {
+        } else if (this.owner instanceof Replica) {
             replicaStateMachine(msg);
         }
-        
     }
 
     @Override
-    public void start(){
+    public void start() {
         owner.debug("Started WriteTransaction: " + this.getId() + " | index: " + this.index + " value: " + this.value);
         if(this.state != WriteTransactionState.INIT) {
             throw new IllegalStateException("Cannot start WriteTransaction in state: " + this.state);
         }
-        if(this.owner instanceof Client) {
+        if (this.owner instanceof Client) {
             Client client = (Client) this.owner;
             client.unicast(startParameters.initialMsg, startParameters.targetActor);
             state = WriteTransactionState.WAITING_RESULT;
@@ -126,17 +136,19 @@ public class WriteTransaction extends Transaction {
         }
     }    
     ////////////////////////////////////////////
-    
+
     // State machine
     void clientStateMachine(Msg msg) {
         Client client = (Client) this.owner;
-        if(msg instanceof WriteResultMsg) {
+        if (msg instanceof WriteResultMsg) {
             WriteResultMsg writeResultMsg = (WriteResultMsg) msg;
-            // The following line is not a protocol send, but a way to sand back to the client the result but changing the message type to WriteResult as 
-            WriteResult res = new WriteResult(true, writeResultMsg.index, writeResultMsg.value, writeResultMsg.replicaId);
+            // The following line is not a protocol send, but a way to sand back to the client the result but changing
+            // the message type to WriteResult as
+            WriteResult res =
+                    new WriteResult(true, writeResultMsg.index, writeResultMsg.value, writeResultMsg.replicaId);
             client.callbackOnWriteResult(res);
             owner.onTransactionComplete(this);
-            if(this.timeout != null) {
+            if (this.timeout != null) {
                 this.timeout.cancel();
             }
             this.state = WriteTransactionState.DONE;
@@ -145,17 +157,19 @@ public class WriteTransaction extends Transaction {
             owner.onTransactionComplete(this);
             this.state = WriteTransactionState.TIMEOUT;
         } else {
-            throw new IllegalArgumentException("Received unexpected message type: " + msg.getClass().getName() + " in WriteTransaction with id: " + this.getId());
+            throw new IllegalArgumentException("Received unexpected message type: "
+                    + msg.getClass().getName() + " in WriteTransaction with id: " + this.getId());
         }
     }
 
     void replicaStateMachine(Msg msg) {
         Replica replica = (Replica) this.owner;
-        if(msg instanceof WriteFinishMsg) {
-            WriteResultMsg writeResultMsg = new WriteResultMsg(this.getId(), this.startEpochPair, owner.getSelf(), this.index, this.value, replica.getId());
+        if (msg instanceof WriteFinishMsg) {
+            WriteResultMsg writeResultMsg = new WriteResultMsg(
+                    this.getId(), this.startEpochPair, owner.getSelf(), this.index, this.value, replica.getId());
             replica.unicast(writeResultMsg, this.destination);
             replica.onTransactionComplete(this);
-            this.state = WriteTransactionState.DONE;    
+            this.state = WriteTransactionState.DONE;
         }
     }
 }
