@@ -170,8 +170,14 @@ public class Replica extends AbstractReplica implements DistributedActor {
         if (coordinator == null) {
             throw new IllegalStateException("Cannot initialize heartbeat: coordinator is not in the replica group.");
         }
-
-        TransactionId heartbeatTransactionId = new TransactionId(coordinator, INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE);
+        
+        TransactionId heartbeatTransactionId;
+        
+        if(this.isCoordinator()) {
+            heartbeatTransactionId = this.getNextTransactionId();
+        } else {
+            heartbeatTransactionId = new TransactionId(coordinator, INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE);
+        }
 
         this.heartbeatTransaction = new HeartbeatTransaction(heartbeatTransactionId, this, getEpochPair());
 
