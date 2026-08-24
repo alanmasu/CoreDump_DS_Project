@@ -2,8 +2,6 @@ package it.unitn.ds;
 
 import akka.actor.ActorRef;
 import akka.actor.Props;
-import it.unitn.ds.ReadTransaction.ReadResultMsg;
-import it.unitn.ds.ReadTransaction.ReadTimeoutMsg;
 import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.Transaction.TransactionId;
 import java.util.LinkedList;

@@ -3,26 +3,59 @@ package it.unitn.ds.regression;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.Optional;
-import java.time.Duration;
-
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-
 import akka.actor.ActorRef;
-import akka.actor.ActorSystem;
+import akka.testkit.TestActorRef;
 import akka.testkit.javadsl.TestKit;
 import it.unitn.ds.AbstractClient.ReadRequest;
 import it.unitn.ds.AbstractClient.ReadResult;
 import it.unitn.ds.AbstractClient.ReadTimeout;
+import it.unitn.ds.AbstractReplica;
+import it.unitn.ds.AbstractReplica.Crash;
 import it.unitn.ds.Client;
 import it.unitn.ds.Logger;
 import it.unitn.ds.Replica;
+import it.unitn.ds.TestsCommons;
+import it.unitn.ds.TestsCommons.TestsSystemWrapper;
+import java.time.Duration;
+import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 class TestReadTransaction {
 
-    @BeforeAll
-    static void setup() {
+    static final int NODES_N = 3;
+    static final int COORDINATOR_ID = 0;
+    TestsSystemWrapper sys;
+    TestKit clientProbe;
+    TestActorRef<Replica> replica;
+    TestActorRef<Client> client;
+
+    @AfterEach
+    void teardown() {
+        sys.system.terminate();
+    }
+
+    @BeforeEach
+    void setup() {
+        sys = TestsCommons.createTestSystem("oneClientWrite_" + COORDINATOR_ID, NODES_N, COORDINATOR_ID);
+        replica = TestActorRef.create(
+                sys.system,
+                Replica.props(
+                        NODES_N + 1,
+                        AbstractReplica.MIN_LATENCY,
+                        AbstractReplica.MAX_LATENCY,
+                        TestsCommons.TEST_COORDINATOR_BEAT_INTERVAL),
+                String.format("%d", NODES_N + 1));
+        clientProbe = new TestKit(sys.system);
+        client = TestActorRef.create(
+                sys.system,
+                Client.propsWithListener(
+                        sys.client_read_timeout,
+                        sys.client_write_timeout,
+                        Optional.ofNullable(sys.actors.get(0)),
+                        clientProbe.getRef()),
+                "client1");
         Logger.setDestinationStdout();
         Logger.setDebugEnabled(true);
         Logger.setLoggingEnabled(true);
@@ -30,35 +63,32 @@ class TestReadTransaction {
 
     @Test
     void testReadTransaction() {
-        ActorSystem sys = ActorSystem.create("TestReadTransaction");
-        TestKit probe = new TestKit(sys);
-        ActorRef replica = sys.actorOf(Replica.props(0, 10, 100, 1000), "replica");
-        ActorRef client = sys.actorOf(Client.propsWithListener(3 * 100,   1000, Optional.empty(), probe.getRef()), "client");
-
         ReadRequest readRequest = new ReadRequest(0, replica);
+        replica.underlyingActor().setPosition(0, 35);
+
+        // Sending the read request to the client
         client.tell(readRequest, replica);
 
-        ReadResult readResult = probe.expectMsgClass(ReadResult.class);
-        
-        assertTrue(readResult.success, "Read transaction should be successful");
-    }
+        ReadResult readResult = clientProbe.expectMsgClass(ReadResult.class);
 
+        assertTrue(readResult.success, "Read transaction should be successful");
+        assertEquals(0, readResult.index, "Read transaction should return the correct index");
+        assertEquals(35, readResult.value, "Read transaction should return the correct value");
+    }
 
     @Test
     void testReadTransactionTimeout() {
-        ActorSystem sys = ActorSystem.create("TestReadTransactionTimeout");
-        TestKit probe = new TestKit(sys);
-        TestKit probeReplica = new TestKit(sys);
-        ActorRef client = sys.actorOf(Client.propsWithListener(1 * 100,   1000, Optional.empty(), probe.getRef()), "client");
-
-        ReadRequest readRequest = new ReadRequest(0, probeReplica.getRef());
-        client.tell(readRequest, probeReplica.getRef());
+        ReadRequest readRequest = new ReadRequest(0, replica);
+        Crash replicaCrash = new Crash(Crash.Type.Now, 0);
+        replica.tell(replicaCrash, ActorRef.noSender());
+        client.tell(readRequest, ActorRef.noSender());
 
         // Expecting a timeout message since the read timeout is set to 100ms
-        ReadTimeout readTimeout = probe.expectMsgClass(Duration.ofMillis(205), ReadTimeout.class);
+        ReadTimeout readTimeout = clientProbe.expectMsgClass(
+                Duration.ofMillis(TestsCommons.getClientReadTimeout(AbstractReplica.MAX_LATENCY, NODES_N + 1)),
+                ReadTimeout.class);
         assertEquals(0, readTimeout.index, "Read transaction should timeout for index 0");
-        assertEquals(probeReplica.getRef(), readTimeout.replica, "Read transaction should timeout for the correct replica");
+        assertEquals(replica, readTimeout.replica, "Read transaction should timeout for the correct replica");
         assertEquals(client, readTimeout.client, "Read transaction should timeout for the correct client");
     }
-    
 }

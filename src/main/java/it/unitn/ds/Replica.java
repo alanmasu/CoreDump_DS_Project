@@ -2,11 +2,11 @@ package it.unitn.ds;
 
 import akka.actor.ActorRef;
 import akka.actor.Props;
-import it.unitn.ds.ReadTransaction.ReadMsg;
-import it.unitn.ds.ReadTransaction.ReadResultMsg;
 import it.unitn.ds.HeartbeatTransaction.HeartbeatMsg;
 import it.unitn.ds.HeartbeatTransaction.WatchdogExpiredMsg;
 import it.unitn.ds.ProbeTransaction.ProbeMsg;
+import it.unitn.ds.ReadTransaction.ReadMsg;
+import it.unitn.ds.ReadTransaction.ReadResultMsg;
 import it.unitn.ds.Transaction.TransactionId;
 import it.unitn.ds.WriteTransaction.WriteFinishMsg;
 import it.unitn.ds.WriteTransaction.WriteMsg;
@@ -272,8 +272,11 @@ public class Replica extends AbstractReplica implements DistributedActor {
                 new WriteTransaction(msg.transactionId, this, getEpochPair(), msg.index, msg.value, msg.sender);
         scheduleTransaction(transaction);
     }
+
     public void onReadMsg(ReadMsg msg) {
-        unicast(new ReadResultMsg(msg.transactionId, msg.epochPair, getSelf(), positions[msg.index], this.id), msg.sender);   
+        unicast(
+                new ReadResultMsg(msg.transactionId, msg.epochPair, getSelf(), getPosition(msg.index), this.id),
+                msg.sender);
     }
 
     /// For testing
