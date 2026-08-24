@@ -61,7 +61,8 @@ public class Client extends AbstractClient implements DistributedActor {
 
     @Override
     public void sendWrite(ActorRef replica, int index, int value) {
-        WriteTransaction transaction = new WriteTransaction(this.getNextTransactionId(), this, null, index, value, replica);
+        WriteTransaction transaction =
+                new WriteTransaction(this.getNextTransactionId(), this, null, index, value, replica);
         scheduleTransaction(transaction);
     }
 
