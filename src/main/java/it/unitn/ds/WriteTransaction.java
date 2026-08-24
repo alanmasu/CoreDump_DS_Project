@@ -117,7 +117,7 @@ public class WriteTransaction extends Transaction {
     @Override
     public void start() {
         owner.debug("Started WriteTransaction: " + this.getId() + " | index: " + this.index + " value: " + this.value);
-        if(this.state != WriteTransactionState.INIT) {
+        if (this.state != WriteTransactionState.INIT) {
             throw new IllegalStateException("Cannot start WriteTransaction in state: " + this.state);
         }
         if (this.owner instanceof Client) {
@@ -125,16 +125,21 @@ public class WriteTransaction extends Transaction {
             client.unicast(startParameters.initialMsg, startParameters.targetActor);
             state = WriteTransactionState.WAITING_RESULT;
             this.timeout = client.scheduleToItself(
-                                    client.getWriteTimeoutDelay(),
-                                    new WriteTimeoutMsg(this.getId(), null, client.getSelf())
-                                );
-        } else if(this.owner instanceof Replica) {
+                    client.getWriteTimeoutDelay(), new WriteTimeoutMsg(this.getId(), null, client.getSelf()));
+        } else if (this.owner instanceof Replica) {
             Replica replica = (Replica) this.owner;
             this.state = WriteTransactionState.WAITING_UPDATE;
-            Transaction transaction = new UpdateTransaction(replica.getNextTransactionId(), replica, this.startEpochPair, this.index, this.value, replica.getCoordinator(), this.getId());
+            Transaction transaction = new UpdateTransaction(
+                    replica.getNextTransactionId(),
+                    replica,
+                    this.startEpochPair,
+                    this.index,
+                    this.value,
+                    replica.getCoordinator(),
+                    this.getId());
             replica.scheduleTransaction(transaction);
         }
-    }    
+    }
     ////////////////////////////////////////////
 
     // State machine

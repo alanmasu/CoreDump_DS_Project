@@ -6,11 +6,7 @@ import it.unitn.ds.HeartbeatTransaction.HeartbeatMsg;
 import it.unitn.ds.HeartbeatTransaction.WatchdogExpiredMsg;
 import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.Transaction.TransactionId;
-import it.unitn.ds.UpdateTransaction.UpdateAckMsg;
 import it.unitn.ds.UpdateTransaction.UpdateMsg;
-import it.unitn.ds.UpdateTransaction.UpdateTimeoutMsg;
-import it.unitn.ds.UpdateTransaction.WriteOkMsg;
-import it.unitn.ds.UpdateTransaction.WriteOkTimeoutMsg;
 import it.unitn.ds.WriteTransaction.WriteFinishMsg;
 import it.unitn.ds.WriteTransaction.WriteMsg;
 import java.util.LinkedList;
@@ -92,7 +88,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
         }
         positions[index] = value;
     }
-    
+
     public ActorRef getCoordinator() {
         return groupOfReplicas.get(coordinatorID);
     }
@@ -170,10 +166,10 @@ public class Replica extends AbstractReplica implements DistributedActor {
         if (coordinator == null) {
             throw new IllegalStateException("Cannot initialize heartbeat: coordinator is not in the replica group.");
         }
-        
+
         TransactionId heartbeatTransactionId;
-        
-        if(this.isCoordinator()) {
+
+        if (this.isCoordinator()) {
             heartbeatTransactionId = this.getNextTransactionId();
         } else {
             heartbeatTransactionId = new TransactionId(coordinator, INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE);
@@ -292,14 +288,15 @@ public class Replica extends AbstractReplica implements DistributedActor {
                 new WriteTransaction(msg.transactionId, this, getEpochPair(), msg.index, msg.value, msg.sender);
         scheduleTransaction(transaction);
     }
-        
-    void onUpdateMsg(UpdateMsg msg){
+
+    void onUpdateMsg(UpdateMsg msg) {
         // debug("Received UpdateMsg for transaction: " + msg.transactionId);
         // debug("Received UpdateMsg [index: " + msg.index + ", value: " + msg.value + "]");
-        if(!msg.transactionId.initiator.equals(this.getSelf())){
-            UpdateTransaction transaction = new UpdateTransaction(msg.transactionId, this, msg.epochPair, msg.index, msg.value, msg.transactionId.initiator);
+        if (!msg.transactionId.initiator.equals(this.getSelf())) {
+            UpdateTransaction transaction = new UpdateTransaction(
+                    msg.transactionId, this, msg.epochPair, msg.index, msg.value, msg.transactionId.initiator);
             this.scheduleTransaction(transaction);
-        }else{
+        } else {
             onMessage(msg);
         }
     }
