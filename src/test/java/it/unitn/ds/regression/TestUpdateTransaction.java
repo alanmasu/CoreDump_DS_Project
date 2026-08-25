@@ -18,17 +18,26 @@ import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.Parameter;
+import org.junit.jupiter.params.ParameterizedClass;
+import org.junit.jupiter.params.provider.CsvSource;
 
+@ParameterizedClass
+@CsvSource({
+    "0,3", "0,5", "1,3", "1,5",
+})
 class TestUpdateTransaction {
 
-    static final int NODES_N = 5;
-    static final int COORDINATOR_ID = 0;
+    @Parameter(0)
+    int coordinatorId = 0;
+
+    @Parameter(1)
+    int nNodes;
+
     static final Crash CRASH_NOW = new Crash(Crash.Type.Now, 0);
     TestsSystemWrapper sys;
     TestKit replicaProbe;
     TestKit clientProbe;
-    // TestActorRef<Replica> replica;
-    // TestActorRef<Client> client;
     ActorRef replica;
     ActorRef client;
 
@@ -39,16 +48,8 @@ class TestUpdateTransaction {
 
     @BeforeEach
     void setup() {
-        // replica = TestActorRef.create(sys.system, Replica.propsWithListener(NODES_N + 1, COORDINATOR_ID,
-        // sys.min_latency, sys.max_latency, replicaProbe.getRef()),
-        //                                         "replica1");
-        // client = TestActorRef.create(sys.system,  Client.propsWithListener(sys.client_read_timeout,
-        //                                                                  sys.client_write_timeout,
-        //                                                                  Optional.empty(),
-        //                                                                  clientProbe.getRef()),
-        //                                         "client1");
         int replicaId = 1;
-        sys = TestsCommons.createTestSystem("oneClientWrite_" + COORDINATOR_ID, NODES_N, COORDINATOR_ID);
+        sys = TestsCommons.createTestSystem("oneClientWrite_" + coordinatorId, nNodes, coordinatorId);
         clientProbe = new TestKit(sys.system);
         replica = sys.actors.get(replicaId);
         client = sys.system.actorOf(
@@ -96,7 +97,7 @@ class TestUpdateTransaction {
 
     @Test
     void testUpdateCoordinatorCrash() {
-        sys.actors.get(COORDINATOR_ID).tell(CRASH_NOW, ActorRef.noSender());
+        sys.actors.get(coordinatorId).tell(CRASH_NOW, ActorRef.noSender());
         assertWriteTimedOut();
     }
 }
