@@ -35,6 +35,7 @@ class TestUpdateTransaction {
     int nNodes;
 
     static final Crash CRASH_NOW = new Crash(Crash.Type.Now, 0);
+    static final int HEARTBEAT_INTERVAL = 150;
     TestsSystemWrapper sys;
     TestKit replicaProbe;
     TestKit clientProbe;
@@ -49,7 +50,13 @@ class TestUpdateTransaction {
     @BeforeEach
     void setup() {
         int replicaId = 1;
-        sys = TestsCommons.createTestSystem("oneClientWrite_" + coordinatorId, nNodes, coordinatorId);
+        sys = TestsCommons.createTestSystem(
+                "oneClientWrite_" + coordinatorId,
+                nNodes,
+                coordinatorId,
+                AbstractReplica.MIN_LATENCY,
+                AbstractReplica.MAX_LATENCY,
+                HEARTBEAT_INTERVAL);
         clientProbe = new TestKit(sys.system);
         replica = sys.actors.get(replicaId);
         client = sys.system.actorOf(
