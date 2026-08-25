@@ -6,7 +6,11 @@ import it.unitn.ds.HeartbeatTransaction.HeartbeatMsg;
 import it.unitn.ds.HeartbeatTransaction.WatchdogExpiredMsg;
 import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.Transaction.TransactionId;
+import it.unitn.ds.UpdateTransaction.UpdateAckMsg;
 import it.unitn.ds.UpdateTransaction.UpdateMsg;
+import it.unitn.ds.UpdateTransaction.UpdateTimeoutMsg;
+import it.unitn.ds.UpdateTransaction.WriteOkMsg;
+import it.unitn.ds.UpdateTransaction.WriteOkTimeoutMsg;
 import it.unitn.ds.WriteTransaction.WriteFinishMsg;
 import it.unitn.ds.WriteTransaction.WriteMsg;
 import java.util.HashMap;
@@ -360,6 +364,9 @@ public class Replica extends AbstractReplica implements DistributedActor {
                     switch (msg) {
                         case HeartbeatMsg _, WatchdogExpiredMsg _ -> this.pendingCrash.type == Crash.Type.Heartbeat;
                         case WriteFinishMsg _ -> this.pendingCrash.type == Crash.Type.WriteOK;
+                        case UpdateMsg _, UpdateTimeoutMsg _, UpdateAckMsg _, WriteOkMsg _, WriteOkTimeoutMsg _ -> {
+                            yield this.pendingCrash.type == Crash.Type.Update;
+                        }
                         default -> false;
                     };
 

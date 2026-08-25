@@ -3,8 +3,6 @@ package it.unitn.ds;
 import akka.actor.ActorRef;
 import it.unitn.ds.WriteTransaction.WriteFinishMsg;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
-import scala.concurrent.duration.Duration;
 
 public class UpdateTransaction extends Transaction {
 
@@ -227,15 +225,9 @@ public class UpdateTransaction extends Transaction {
             UpdateAckMsg updateAckMsg = new UpdateAckMsg(this.getId(), this.startEpochPair, replica.getSelf());
             replica.unicast(updateAckMsg, this.destination.get());
             this.state = UpdateTransactionState.WAITING_WRITEOK;
-            this.timeout = replica.getContext()
-                    .system()
-                    .scheduler()
-                    .scheduleOnce(
-                            Duration.create(replica.getMaxLatency() * 3, TimeUnit.MILLISECONDS),
-                            replica.getSelf(),
-                            new WriteOkTimeoutMsg(this.getId(), this.startEpochPair, replica.getSelf()),
-                            replica.getContext().system().dispatcher(),
-                            replica.getSelf());
+            this.timeout = replica.scheduleToItself(
+                    replica.getMaxLatency() * 3,
+                    new WriteOkTimeoutMsg(this.getId(), this.startEpochPair, replica.getSelf()));
         } else if (msg instanceof WriteOkMsg) {
             WriteOkMsg writeOkMsg = (WriteOkMsg) msg;
             if (this.timeout != null) {
