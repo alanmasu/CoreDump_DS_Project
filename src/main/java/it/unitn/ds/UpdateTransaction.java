@@ -219,6 +219,11 @@ public class UpdateTransaction extends Transaction {
                 this.state = UpdateTransactionState.COMMITTED;
                 replica.callbackOnUpdateApplied(writeOk.index, writeOk.value);
                 replica.onTransactionComplete(this);
+                if (this.writeTid.isPresent()) {
+                    WriteFinishMsg writeFinishMsg =
+                            new WriteFinishMsg(this.writeTid.get(), this.startEpochPair, replica.getSelf());
+                    replica.getSelf().tell(writeFinishMsg, replica.getSelf());
+                }
             }
         }
     }
