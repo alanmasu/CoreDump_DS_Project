@@ -214,16 +214,7 @@ public class UpdateTransaction extends Transaction {
                 WriteOkMsg writeOk =
                         new WriteOkMsg(this.getId(), this.startEpochPair, replica.getSelf(), this.index, this.value);
                 replica.broadcast(writeOk);
-                // TODO: implement the EpochPair update
-                // TODO: Implement the storage to the history of the replica
-                this.state = UpdateTransactionState.COMMITTED;
-                replica.callbackOnUpdateApplied(writeOk.index, writeOk.value);
-                replica.onTransactionComplete(this);
-                if (this.writeTid.isPresent()) {
-                    WriteFinishMsg writeFinishMsg =
-                            new WriteFinishMsg(this.writeTid.get(), this.startEpochPair, replica.getSelf());
-                    replica.getSelf().tell(writeFinishMsg, replica.getSelf());
-                }
+                termination(replica, writeOk);
             }
         }
     }
@@ -250,16 +241,7 @@ public class UpdateTransaction extends Transaction {
             if (this.timeout != null) {
                 this.timeout.cancel();
             }
-            // TODO: Update the list value on the replica
-            // TODO: Update the EpochPair on the replica
-            this.state = UpdateTransactionState.COMMITTED;
-            owner.onTransactionComplete(this);
-            replica.callbackOnUpdateApplied(writeOkMsg.index, writeOkMsg.value);
-            if (this.writeTid.isPresent()) {
-                WriteFinishMsg writeFinishMsg =
-                        new WriteFinishMsg(this.writeTid.get(), this.startEpochPair, replica.getSelf());
-                replica.getSelf().tell(writeFinishMsg, replica.getSelf());
-            }
+            termination(replica, writeOkMsg);
         }
         // else if (msg instanceof UpdateTimeoutMsg || msg instanceof WriteOkTimeoutMsg){
         //     this.timeout = null;
@@ -268,5 +250,21 @@ public class UpdateTransaction extends Transaction {
         //     replica.scheduleTransaction(null);
         //     // TODO: Understend what to to here, if terminate this transaction, or wait the election
         // }
+
+    }
+
+    protected void termination(Replica replica, WriteOkMsg writeOkMsg) {
+        EpochPair nextEpochPair = new EpochPair(
+                replica.getEpochPair().getEpoch(), replica.getEpochPair().getSequence() + 1);
+        replica.setEpochPair(nextEpochPair);
+        this.state = UpdateTransactionState.COMMITTED;
+        if (this.writeTid.isPresent()) {
+            WriteFinishMsg writeFinishMsg =
+                    new WriteFinishMsg(this.writeTid.get(), this.startEpochPair, replica.getSelf());
+            replica.getSelf().tell(writeFinishMsg, replica.getSelf());
+        }
+        replica.callbackOnUpdateApplied(writeOkMsg.index, writeOkMsg.value);
+        replica.addUpdateToHistory(this);
+        owner.onTransactionComplete(this);
     }
 }

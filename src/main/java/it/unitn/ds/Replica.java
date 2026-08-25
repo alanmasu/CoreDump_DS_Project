@@ -9,6 +9,7 @@ import it.unitn.ds.Transaction.TransactionId;
 import it.unitn.ds.UpdateTransaction.UpdateMsg;
 import it.unitn.ds.WriteTransaction.WriteFinishMsg;
 import it.unitn.ds.WriteTransaction.WriteMsg;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
 
     private static final int INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE = 0;
     private Map<Integer, ActorRef> groupOfReplicas;
+    private Map<EpochPair, UpdateTransaction> updateHistory;
     private List<Transaction> activeTransactions;
     private int transactionCounter;
     private EpochPair epochPair;
@@ -57,6 +59,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.crashCount = 0;
         this.activeTransactions = new LinkedList<>();
         this.transactionCounter = 0;
+        this.updateHistory = new HashMap<>();
     }
 
     public static Props props(int id, int minLatency, int maxLatency, int coordinatorBeatInterval) {
@@ -233,10 +236,19 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.coordinatorID = coordinatorID;
     }
 
+    /**
+     * Returns the current epoch pair of the replica.
+     * @return The current epoch pair of the replica.
+     */
     public EpochPair getEpochPair() {
         return this.epochPair;
     }
 
+    /**
+     * Sets the current epoch pair of the replica.
+     * @param epochPair The new epoch pair to be set.
+     * @throws IllegalArgumentException if the provided epochPair is null or if it is less than the current epochPair.
+     */
     public void setEpochPair(EpochPair epochPair) throws IllegalArgumentException {
         if (epochPair == null) {
             throw new IllegalArgumentException("EpochPair cannot be null");
@@ -249,6 +261,22 @@ public class Replica extends AbstractReplica implements DistributedActor {
             throw new IllegalArgumentException("New epochPair must be greater than or equal to the current epochPair");
         }
         this.epochPair = epochPair;
+    }
+
+    /**
+     * Returns the update history of the replica, which is a map of epoch pairs to their corresponding UpdateTransaction.
+     * @return A map containing the update history of the replica.
+     */
+    public Map<EpochPair, UpdateTransaction> getUpdateHistory() {
+        return new HashMap<>(this.updateHistory);
+    }
+
+    /**
+     * Adds an UpdateTransaction to the update history of the replica.
+     * @param updateTransaction The UpdateTransaction to be added to the history.
+     */
+    public void addUpdateToHistory(UpdateTransaction updateTransaction) {
+        this.updateHistory.put(getEpochPair(), updateTransaction);
     }
 
     @Override
