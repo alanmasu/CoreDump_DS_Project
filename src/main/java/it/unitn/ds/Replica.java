@@ -60,6 +60,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.activeTransactions = new LinkedList<>();
         this.transactionCounter = 0;
         this.updateHistory = new HashMap<>();
+        this.epochPair = new EpochPair(0, 0);
     }
 
     public static Props props(int id, int minLatency, int maxLatency, int coordinatorBeatInterval) {
