@@ -156,18 +156,20 @@ public class UpdateTransaction extends Transaction {
                     "UpdateTransaction " + this.getId() + " is not in INIT state, cannot start.");
         }
         // replica.debug("Started UpdateTransaction: " + this.getId());
-        if (this.writeTid.isPresent()) { // Case 1: Participant replica who wants to update an element
-            forwardToCoordinator(replica);
-        } else if (this.destination.isPresent()
-                && !replica.isCoordinator()) { // Case 2: Participant replica who received an UpdateMsg from the
-            // coordinator
-            startAsReplica(replica);
-        } else if (replica
-                .isCoordinator()) { // Case 3: Coordinator replica who received an UpdateMsg from a participant
+        if (replica.isCoordinator()) {
+            // Case 1: Coordinator replica who received an UpdateMsg from a participant
             startAsCoordinator(replica);
         } else {
-            throw new IllegalStateException(
-                    "UpdateTransaction " + this.getId() + " is not able to start, invalid state or parameters.");
+            if (this.writeTid.isPresent()) {
+                // Case 2: Participant replica who wants to update an element
+                forwardToCoordinator(replica);
+            } else if (this.destination.isPresent() && !replica.isCoordinator()) {
+                // Case 3: Participant replica who received an UpdateMsg from the coordinator
+                startAsReplica(replica);
+            } else {
+                throw new IllegalStateException(
+                        "UpdateTransaction " + this.getId() + " is not able to start, invalid state or parameters.");
+            }
         }
     }
     //////////////////////////////////////////
