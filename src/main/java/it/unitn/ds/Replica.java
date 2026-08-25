@@ -20,14 +20,12 @@ import java.util.Map;
 import java.util.Optional;
 
 public class Replica extends AbstractReplica implements DistributedActor {
-
     private static final int INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE = 0;
     private Map<Integer, ActorRef> groupOfReplicas;
     private Map<EpochPair, UpdateTransaction> updateHistory;
     private List<Transaction> activeTransactions;
     private int transactionCounter;
     private EpochPair epochPair;
-
     private int positions[];
     private int coordinatorID;
 
@@ -41,7 +39,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     private CrashStatus replicaStatus;
     private int crashCount;
     private AbstractReplica.Crash pendingCrash;
-    ////////////////////////////////////////////
+    ///////////////////////////////////////
 
     // Manages heartbeat sending or coordinator monitoring for this Replica
     private HeartbeatTransaction heartbeatTransaction;
@@ -352,11 +350,9 @@ public class Replica extends AbstractReplica implements DistributedActor {
     }
 
     /**
-     * This callback method is invoked whenever a message is received by the replica and the parameter allows to differentiate the type of message.
-     * The callback then checks if the replica is in a pending crash state and if the type of message matches the pending crash type.
-     * If so, it increments the crash count and checks if it has reached the threshold for crashing.
-     * If the threshold is met, the replica's status is updated to CRASHED.
-     * @param crashType Enum representing the type of message received, used to determine if the replica should crash and if to increment the crash count.
+     * This callback handles the counting of messages received by the replica when a pending crash is set.
+     * Call this method passing the handled message to update accordingly to its type and the pending crash type.
+     * @param msg The message handled by the replica.
      */
     void updateCrashStatusCallback(Msg msg) {
         if (this.replicaStatus == CrashStatus.PENDING) {
