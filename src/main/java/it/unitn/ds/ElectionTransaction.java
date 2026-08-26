@@ -7,6 +7,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
+import akka.actor.ActorRef;
+
 public final class ElectionTransaction extends Transaction {
     
     private enum State {
@@ -19,6 +21,78 @@ public final class ElectionTransaction extends Transaction {
 
     private State state;
 
+
+    /**
+     * 
+     * Network message carrying the election token around the ring.
+     * 
+     * The candidate list is copied when the message is create, so later changes to the caller's list
+     * cannot modify a message already in transit.
+     */
+    public static final class ElectionMsg extends Msg {
+        
+        public final int failedCoordinatorId;
+        public final List<ElectionCandidate> candidates;
+
+        public ElectionMsg(
+            TransactionId transactionId,
+            EpochPair epochPair,
+            ActorRef sender,
+            int failedCoordinatorId,
+            List<ElectionCandidate> candidates
+        ) 
+        {
+            super(transactionId, epochPair, sender);
+            this.failedCoordinatorId = failedCoordinatorId;
+            this.candidates = List.copyOf(
+                Objects.requireNonNull(
+                    candidates,
+                    "candidates must not be null")
+            );
+        }
+
+    }
+
+    /**
+     * Network message acknowledging receipt of an election token.
+     * 
+     * The sender is the replica that received the election message.
+     * The transaction ID identifies which election token is being acknowledged.
+     */
+    public static final class ElectionAckMsg extends Msg {
+
+        public ElectionAckMsg(TransactionId transactionId, EpochPair epochPair, ActorRef sender) {
+            super(transactionId, epochPair, sender);
+        }
+    }
+
+    /**
+     * Local scheduler message used when a replica is waiting for an ACK.
+     * 
+     * This message never crosses the network. It is delivered to the owning replica's mailbox.
+     */
+    public static final class ElectionAckTimeoutMsg extends Msg {
+
+        // The replica whose ACK we are waiting for
+        public final int expectedTargetId;
+        // Identifies the current timeout attempt
+        public final long attemptVersion;
+
+        public ElectionAckTimeoutMsg(
+            TransactionId transactionId,
+            EpochPair epochPair,
+            ActorRef sender,
+            int expectedTargetId,
+            long attemptVersion)
+        {
+            super(transactionId, epochPair, sender);
+
+            this.expectedTargetId = expectedTargetId;
+            this.attemptVersion = attemptVersion;
+        }
+    }
+
+    // TODO: Need javadoc here
     public static final class ElectionCandidate implements Comparable<ElectionCandidate>, Serializable {
         
         private static final long serialVersionUID = 1L;
@@ -98,7 +172,10 @@ public final class ElectionTransaction extends Transaction {
                     "current replica is not part of the ring");
             }
             
+            // We need a for loop here since if an element is unavailable, we need to increment
+            // the offset and go look at the next element.
             for (int offset = 1; offset < ringReplicaIds.size(); offset++) {
+                // Pick next candidate index
                 int candidateIndex = (currentIndex + offset) % ringReplicaIds.size();
                 int candidateId = ringReplicaIds.get(candidateIndex);
 

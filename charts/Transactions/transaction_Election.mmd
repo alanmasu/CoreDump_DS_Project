@@ -21,13 +21,13 @@ sequenceDiagram
     end
 
     rect rgba(0, 255, 0, 0.20)
-        R3 ->> R4: ElectionMsg(round=1, {R3=pair(2,4)})
+        R3 ->> R4: ElectionMsg({R3=pair(2,4)})
         R3 ->> S: schedule ElectionAckTimeout
         Note right of R3: WAITING_FOR_ACK
 
         Note right of R4: Create local ElectionTransaction<br/>Add candidate R4=pair(2,5)
         R4 ->> R3: ElectionAckMsg()
-        R4 ->> R2: ElectionMsg(round=1, {R3=pair(2,4), R4=pair(2,5)})
+        R4 ->> R2: ElectionMsg({R3=pair(2,4), R4=pair(2,5)})
         R4 ->> S: schedule ElectionAckTimeout
         Note right of R4: WAITING_FOR_ACK
 
@@ -35,7 +35,7 @@ sequenceDiagram
 
         Note right of R2: Create local ElectionTransaction<br/>Add candidate R2=pair(2,3)
         R2 ->> R4: ElectionAckMsg()
-        R2 ->> R3: ElectionMsg(round=1, {R2=pair(2,3), R3=pair(2,4), R4=pair(2,5)})
+        R2 ->> R3: ElectionMsg({R2=pair(2,3), R3=pair(2,4), R4=pair(2,5)})
         R2 ->> S: schedule ElectionAckTimeout
         Note right of R2: WAITING_FOR_ACK
 
@@ -43,7 +43,7 @@ sequenceDiagram
 
         R3 ->> R2: ElectionAckMsg()
         Note right of R3: Candidate already present<br/>Local replica is not winner
-        R3 ->> R4: ElectionMsg(round=1, {R2=pair(2,3), R3=pair(2,4), R4=pair(2,5)})
+        R3 ->> R4: ElectionMsg({R2=pair(2,3), R3=pair(2,4), R4=pair(2,5)})
         R3 ->> S: schedule ElectionAckTimeout
         Note right of R3: WAITING_FOR_ACK
 

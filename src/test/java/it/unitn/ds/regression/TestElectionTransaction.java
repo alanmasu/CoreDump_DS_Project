@@ -3,13 +3,16 @@ package it.unitn.ds.regression;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
 import it.unitn.ds.ElectionTransaction;
 import it.unitn.ds.EpochPair;
 import it.unitn.ds.ElectionTransaction.ElectionCandidate;
+import it.unitn.ds.Transaction.TransactionId;
 
 import org.junit.jupiter.api.Test;
 
@@ -86,5 +89,65 @@ public class TestElectionTransaction {
                 () -> ring.nextReplicaId(
                         2,
                         Set.of(0, 3, 5)));
+    }
+
+    @Test
+    void electionMessageCopiesAndProtectsCandidateList() {
+        ElectionCandidate candidate =
+                new ElectionCandidate(3, new EpochPair(2, 4));
+
+        List<ElectionCandidate> originalCandidates =
+                new ArrayList<>(List.of(candidate));
+
+        ElectionTransaction.ElectionMsg message =
+                new ElectionTransaction.ElectionMsg(
+                        null,
+                        new EpochPair(2, 4),
+                        null,
+                        1,
+                        originalCandidates);
+
+        originalCandidates.clear();
+
+        assertEquals(1, message.candidates.size());
+        assertSame(candidate, message.candidates.get(0));
+
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> message.candidates.add(candidate));
+    }
+
+    @Test
+    void electionAckPreservesTransactionMetadata() {
+        TransactionId transactionId = new TransactionId(null, 7);
+        EpochPair epochPair = new EpochPair(2, 4);
+
+        ElectionTransaction.ElectionAckMsg ack =
+                new ElectionTransaction.ElectionAckMsg(
+                        transactionId,
+                        epochPair,
+                        null);
+
+        assertSame(transactionId, ack.transactionId);
+        assertSame(epochPair, ack.epochPair);
+    }
+
+    @Test
+    void electionAckTimeoutPreservesTargetAndAttemptVersion() {
+        TransactionId transactionId = new TransactionId(null, 8);
+        EpochPair epochPair = new EpochPair(2, 4);
+
+        ElectionTransaction.ElectionAckTimeoutMsg timeout =
+                new ElectionTransaction.ElectionAckTimeoutMsg(
+                        transactionId,
+                        epochPair,
+                        null,
+                        5,
+                        2L);
+
+        assertSame(transactionId, timeout.transactionId);
+        assertSame(epochPair, timeout.epochPair);
+        assertEquals(5, timeout.expectedTargetId);
+        assertEquals(2L, timeout.attemptVersion);
     }
 }
