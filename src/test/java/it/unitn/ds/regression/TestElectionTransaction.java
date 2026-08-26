@@ -1,6 +1,7 @@
 package it.unitn.ds.regression;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -64,6 +65,30 @@ public class TestElectionTransaction {
                 new ElectionCandidate(5, new EpochPair(2, 4));
 
         assertEquals(0, first.compareTo(same));
+    }
+
+    @Test
+    void realUpdateBeatsCandidateWithNoObservedUpdate() {
+        ElectionCandidate noUpdate =
+                new ElectionCandidate(5);
+
+        ElectionCandidate realUpdate =
+                new ElectionCandidate(0, new EpochPair(0, 0));
+
+        assertTrue(realUpdate.compareTo(noUpdate) > 0);
+        assertTrue(noUpdate.compareTo(realUpdate) < 0);
+    }
+
+    @Test
+    void noUpdateCandidatesUseReplicaIdAsTieBreaker() {
+        ElectionCandidate lowerId =
+                new ElectionCandidate(2);
+
+        ElectionCandidate higherId =
+                new ElectionCandidate(5);
+
+        assertTrue(higherId.compareTo(lowerId) > 0);
+        assertTrue(lowerId.compareTo(higherId) < 0);
     }
 
 
@@ -149,5 +174,28 @@ public class TestElectionTransaction {
         assertSame(epochPair, timeout.epochPair);
         assertEquals(5, timeout.expectedTargetId);
         assertEquals(2L, timeout.attemptVersion);
+    }
+
+    @Test
+    void synchronizationMessageProtectsPositionsSnapshot() {
+        int[] originalPositions = {1, 2, 3};
+
+        ElectionTransaction.SynchronizationMsg message =
+                new ElectionTransaction.SynchronizationMsg(
+                        null,
+                        new EpochPair(3, 0),
+                        null,
+                        1,
+                        5,
+                        new EpochPair(3, 0),
+                        originalPositions);
+
+        originalPositions[0] = 99;
+        int[] firstRead = message.getPositions();
+        firstRead[1] = 88;
+
+        assertArrayEquals(
+                new int[] {1, 2, 3},
+                message.getPositions());
     }
 }

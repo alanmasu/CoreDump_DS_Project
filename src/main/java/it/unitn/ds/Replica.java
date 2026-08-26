@@ -8,10 +8,15 @@ import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.Transaction.TransactionId;
 import it.unitn.ds.WriteTransaction.WriteFinishMsg;
 import it.unitn.ds.WriteTransaction.WriteMsg;
+import it.unitn.ds.ElectionTransaction.ElectionMsg;
+import it.unitn.ds.ElectionTransaction.SynchronizationMsg;
 import java.util.LinkedList;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 public class Replica extends AbstractReplica implements DistributedActor {
 
@@ -23,6 +28,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
 
     private int positions[];
     private int coordinatorID;
+    private final Set<Integer> startedElectionCoordinators;
+    private final Set<Integer> completedElectionCoordinators;
 
     ///////////// For crashing ////////////
     private enum CrashStatus {
@@ -56,6 +63,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.crashCount = 0;
         this.activeTransactions = new LinkedList<>();
         this.transactionCounter = 0;
+        this.startedElectionCoordinators = new HashSet<>();
+        this.completedElectionCoordinators = new HashSet<>();
     }
 
     public static Props props(int id, int minLatency, int maxLatency, int coordinatorBeatInterval) {
@@ -237,6 +246,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
                 .match(WriteMsg.class, this::onWriteMsg)
+                .match(ElectionMsg.class, this::onElectionMsg)
+                .match(SynchronizationMsg.class, this::onSynchronizationMsg)
                 // Handle TestMsg messages, leave it as last
                 .match(ProbeMsg.class, this::onProbeMsg)
                 .matchAny(msg -> defaultDispatcher(msg))
@@ -252,7 +263,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
         if (this.replicaStatus == CrashStatus.CRASHED) {
             return;
         }
-        for (Transaction transaction : activeTransactions) {
+        for (Transaction transaction : new ArrayList<>(activeTransactions)) {
             if (transaction.getId().equals(msg.transactionId)) {
                 transaction.computeState(msg);
                 delivered = true;
@@ -268,6 +279,151 @@ public class Replica extends AbstractReplica implements DistributedActor {
         WriteTransaction transaction =
                 new WriteTransaction(msg.transactionId, this, getEpochPair(), msg.index, msg.value, msg.sender);
         scheduleTransaction(transaction);
+    }
+
+    void startElection(int failedCoordinatorId) {
+        if (completedElectionCoordinators.contains(failedCoordinatorId)
+                || !startedElectionCoordinators.add(failedCoordinatorId)) {
+            return;
+        }
+
+        callbackOnElectionStarted(failedCoordinatorId);
+
+        ElectionTransaction transaction = new ElectionTransaction(
+                getNextTransactionId(),
+                this,
+                getEpochPair(),
+                failedCoordinatorId,
+                groupOfReplicas,
+                true);
+        scheduleTransaction(transaction);
+    }
+
+    public void onElectionMsg(ElectionMsg message) {
+        if (this.replicaStatus == CrashStatus.CRASHED) {
+            return;
+        }
+
+        if (completedElectionCoordinators.contains(message.failedCoordinatorId)) {
+            return;
+        }
+
+        for (Transaction transaction : activeTransactions) {
+            if (transaction.getId().equals(message.transactionId)) {
+                onMessage(message);
+                return;
+            }
+        }
+
+        if (startedElectionCoordinators.add(message.failedCoordinatorId)) {
+            callbackOnElectionStarted(message.failedCoordinatorId);
+        }
+
+        ElectionTransaction transaction = new ElectionTransaction(
+                message.transactionId,
+                this,
+                getEpochPair(),
+                message.failedCoordinatorId,
+                groupOfReplicas,
+                false);
+        scheduleTransaction(transaction);
+        onMessage(message);
+    }
+
+    public void onSynchronizationMsg(SynchronizationMsg message) {
+        if (this.replicaStatus == CrashStatus.CRASHED) {
+            return;
+        }
+        applySynchronization(message);
+    }
+
+    void completeElectionAsWinner(
+            int failedCoordinatorId,
+            TransactionId electionTransactionId,
+            List<ElectionTransaction.ElectionCandidate> candidates) {
+        if (!completedElectionCoordinators.add(failedCoordinatorId)) {
+            return;
+        }
+
+        int maximumEpoch = 0;
+        for (ElectionTransaction.ElectionCandidate candidate : candidates) {
+            if (candidate.hasObservedUpdate()) {
+                maximumEpoch = Math.max(
+                        maximumEpoch,
+                        candidate.getLatestObservedEpochPair().getEpoch());
+            }
+        }
+
+        EpochPair newEpochPair = new EpochPair(maximumEpoch + 1, 0);
+        coordinatorID = getId();
+        setEpochPair(newEpochPair);
+        callbackOnCoordinatorElected(getId());
+
+        SynchronizationMsg synchronization = new SynchronizationMsg(
+                electionTransactionId,
+                newEpochPair,
+                getSelf(),
+                failedCoordinatorId,
+                getId(),
+                newEpochPair,
+                positions);
+
+        for (Map.Entry<Integer, ActorRef> entry : groupOfReplicas.entrySet()) {
+            if (entry.getKey() != getId()) {
+                unicast(synchronization, entry.getValue());
+            }
+        }
+
+        restartHeartbeat(newEpochPair);
+        removeElectionTransactions(failedCoordinatorId);
+    }
+
+    private void applySynchronization(SynchronizationMsg message) {
+        if (!completedElectionCoordinators.add(message.failedCoordinatorId)) {
+            return;
+        }
+
+        int[] synchronizedPositions = message.getPositions();
+        if (synchronizedPositions.length != positions.length) {
+            throw new IllegalArgumentException(
+                    "Synchronization positions have an invalid length");
+        }
+
+        System.arraycopy(
+                synchronizedPositions,
+                0,
+                positions,
+                0,
+                positions.length);
+        coordinatorID = message.newCoordinatorId;
+        setEpochPair(message.newEpochPair);
+        callbackOnCoordinatorElected(message.newCoordinatorId);
+        restartHeartbeat(message.newEpochPair);
+        removeElectionTransactions(message.failedCoordinatorId);
+    }
+
+    private void restartHeartbeat(EpochPair epochPair) {
+        if (heartbeatTransaction != null) {
+            activeTransactions.remove(heartbeatTransaction);
+        }
+
+        ActorRef coordinator = groupOfReplicas.get(coordinatorID);
+        if (coordinator == null) {
+            return;
+        }
+
+        heartbeatTransaction = new HeartbeatTransaction(
+                new TransactionId(coordinator, INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE),
+                this,
+                epochPair);
+        scheduleTransaction(heartbeatTransaction);
+    }
+
+    private void removeElectionTransactions(int failedCoordinatorId) {
+        activeTransactions.removeIf(transaction ->
+                transaction instanceof ElectionTransaction
+                        && ((ElectionTransaction) transaction)
+                                .getFailedCoordinatorId() == failedCoordinatorId);
     }
 
     /// For testing
@@ -296,10 +452,13 @@ public class Replica extends AbstractReplica implements DistributedActor {
      */
     void updateCrashStatusCallback(Msg msg) {
         if (this.replicaStatus == CrashStatus.PENDING) {
-            boolean shouldIncrementCrashCount =
+                    boolean shouldIncrementCrashCount =
                     switch (msg) {
                         case HeartbeatMsg _, WatchdogExpiredMsg _ -> this.pendingCrash.type == Crash.Type.Heartbeat;
                         case WriteFinishMsg _ -> this.pendingCrash.type == Crash.Type.WriteOK;
+                        case ElectionMsg _, ElectionTransaction.ElectionAckMsg _,
+                                ElectionTransaction.ElectionAckTimeoutMsg _, SynchronizationMsg _ ->
+                                this.pendingCrash.type == Crash.Type.Election;
                         default -> false;
                     };
 
