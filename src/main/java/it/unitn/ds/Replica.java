@@ -9,6 +9,7 @@ import it.unitn.ds.Transaction.TransactionId;
 import it.unitn.ds.WriteTransaction.WriteFinishMsg;
 import it.unitn.ds.WriteTransaction.WriteMsg;
 import it.unitn.ds.ElectionTransaction.ElectionMsg;
+import it.unitn.ds.ElectionTransaction.ElectionStartMsg;
 import it.unitn.ds.ElectionTransaction.SynchronizationMsg;
 import java.util.LinkedList;
 import java.util.ArrayList;
@@ -24,12 +25,15 @@ public class Replica extends AbstractReplica implements DistributedActor {
     private Map<Integer, ActorRef> groupOfReplicas;
     private List<Transaction> activeTransactions;
     private int transactionCounter;
+    private int electionTransactionCounter;
     private EpochPair epochPair;
 
     private int positions[];
     private int coordinatorID;
     private final Set<Integer> startedElectionCoordinators;
+    private final Set<Integer> scheduledElectionCoordinators;
     private final Set<Integer> completedElectionCoordinators;
+    private final Map<Integer, TransactionId> electionTransactionIds;
 
     ///////////// For crashing ////////////
     private enum CrashStatus {
@@ -63,8 +67,14 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.crashCount = 0;
         this.activeTransactions = new LinkedList<>();
         this.transactionCounter = 0;
+        // Negative sequence numbers are reserved for election transactions.
+        // Heartbeat transactions use sequence 0, while ordinary transaction IDs
+        // obtained through getNextTransactionId() remain non-negative.
+        this.electionTransactionCounter = -1;
         this.startedElectionCoordinators = new HashSet<>();
+        this.scheduledElectionCoordinators = new HashSet<>();
         this.completedElectionCoordinators = new HashSet<>();
+        this.electionTransactionIds = new java.util.HashMap<>();
     }
 
     public static Props props(int id, int minLatency, int maxLatency, int coordinatorBeatInterval) {
@@ -209,6 +219,20 @@ public class Replica extends AbstractReplica implements DistributedActor {
     }
 
     /**
+     * Returns an ID from the election-specific transaction namespace.
+     *
+     * Election messages circulate between replicas and are routed using their
+     * transaction ID. Keeping their sequence numbers negative prevents them
+     * from colliding with heartbeat IDs, which use sequence 0, or with normal
+     * replica transaction IDs.
+     */
+    private TransactionId getNextElectionTransactionId() {
+        TransactionId id = new TransactionId(this.getSelf(), electionTransactionCounter);
+        --electionTransactionCounter;
+        return id;
+    }
+
+    /**
      * Returns the coordinator ID of the replica.
      * @return The coordinator ID of the replica.
      */
@@ -247,6 +271,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
         return createBaseReceiveBuilder()
                 .match(WriteMsg.class, this::onWriteMsg)
                 .match(ElectionMsg.class, this::onElectionMsg)
+                .match(ElectionStartMsg.class, this::onElectionStartMsg)
                 .match(SynchronizationMsg.class, this::onSynchronizationMsg)
                 // Handle TestMsg messages, leave it as last
                 .match(ProbeMsg.class, this::onProbeMsg)
@@ -283,6 +308,44 @@ public class Replica extends AbstractReplica implements DistributedActor {
 
     void startElection(int failedCoordinatorId) {
         if (completedElectionCoordinators.contains(failedCoordinatorId)
+                || startedElectionCoordinators.contains(failedCoordinatorId)
+                || !scheduledElectionCoordinators.add(failedCoordinatorId)) {
+            return;
+        }
+
+        scheduleToItself(
+                electionStartDelay(failedCoordinatorId),
+                new ElectionStartMsg(
+                        null,
+                        getEpochPair(),
+                        getSelf(),
+                        failedCoordinatorId));
+    }
+
+    private long electionStartDelay(int failedCoordinatorId) {
+        List<Integer> ringIds = new ArrayList<>(groupOfReplicas.keySet());
+        ringIds.sort(Integer::compareTo);
+
+        int failedCoordinatorIndex = ringIds.indexOf(failedCoordinatorId);
+        int replicaIndex = ringIds.indexOf(getId());
+        if (failedCoordinatorIndex < 0 || replicaIndex < 0) {
+            throw new IllegalArgumentException(
+                    "Election participants must belong to the replica ring");
+        }
+
+        int ringDistance =
+                (replicaIndex - failedCoordinatorIndex + ringIds.size())
+                        % ringIds.size();
+        if (ringDistance == 0) {
+            throw new IllegalArgumentException(
+                    "The failed coordinator cannot start its own election");
+        }
+
+        return (long) ringDistance * getMaxLatencyPlusTolerance();
+    }
+
+    private void beginElection(int failedCoordinatorId) {
+        if (completedElectionCoordinators.contains(failedCoordinatorId)
                 || !startedElectionCoordinators.add(failedCoordinatorId)) {
             return;
         }
@@ -290,13 +353,19 @@ public class Replica extends AbstractReplica implements DistributedActor {
         callbackOnElectionStarted(failedCoordinatorId);
 
         ElectionTransaction transaction = new ElectionTransaction(
-                getNextTransactionId(),
+                getNextElectionTransactionId(),
                 this,
                 getEpochPair(),
                 failedCoordinatorId,
                 groupOfReplicas,
                 true);
+        electionTransactionIds.put(failedCoordinatorId, transaction.getId());
         scheduleTransaction(transaction);
+    }
+
+    public void onElectionStartMsg(ElectionStartMsg message) {
+        scheduledElectionCoordinators.remove(message.failedCoordinatorId);
+        beginElection(message.failedCoordinatorId);
     }
 
     public void onElectionMsg(ElectionMsg message) {
@@ -308,15 +377,30 @@ public class Replica extends AbstractReplica implements DistributedActor {
             return;
         }
 
-        for (Transaction transaction : activeTransactions) {
-            if (transaction.getId().equals(message.transactionId)) {
-                onMessage(message);
-                return;
-            }
+        scheduledElectionCoordinators.remove(message.failedCoordinatorId);
+
+        TransactionId currentElectionId =
+                electionTransactionIds.get(message.failedCoordinatorId);
+        if (currentElectionId != null
+                && currentElectionId.equals(message.transactionId)) {
+            onMessage(message);
+            return;
         }
 
-        if (startedElectionCoordinators.add(message.failedCoordinatorId)) {
-            callbackOnElectionStarted(message.failedCoordinatorId);
+        if (currentElectionId != null) {
+            if (isIncomingElectionPreferred(
+                    currentElectionId,
+                    message.transactionId)) {
+                replaceElection(currentElectionId, message);
+                onMessage(message);
+                return;
+            } else {
+                rejectElection(message);
+                return;
+            }
+        } else if (startedElectionCoordinators.contains(message.failedCoordinatorId)) {
+            rejectElection(message);
+            return;
         }
 
         ElectionTransaction transaction = new ElectionTransaction(
@@ -326,8 +410,87 @@ public class Replica extends AbstractReplica implements DistributedActor {
                 message.failedCoordinatorId,
                 groupOfReplicas,
                 false);
+        electionTransactionIds.put(
+                message.failedCoordinatorId,
+                message.transactionId);
+        startedElectionCoordinators.add(message.failedCoordinatorId);
+        callbackOnElectionStarted(message.failedCoordinatorId);
         scheduleTransaction(transaction);
         onMessage(message);
+    }
+
+    private boolean isIncomingElectionPreferred(
+            TransactionId currentElectionId,
+            TransactionId incomingElectionId) {
+        int currentInitiatorId = replicaIdFor(currentElectionId.initiator);
+        int incomingInitiatorId = replicaIdFor(incomingElectionId.initiator);
+
+        if (incomingInitiatorId != currentInitiatorId) {
+            return incomingInitiatorId < currentInitiatorId;
+        }
+        return incomingElectionId.sequenceNumber < currentElectionId.sequenceNumber;
+    }
+
+    private int replicaIdFor(ActorRef actorRef) {
+        for (Map.Entry<Integer, ActorRef> entry : groupOfReplicas.entrySet()) {
+            if (entry.getValue().equals(actorRef)) {
+                return entry.getKey();
+            }
+        }
+        throw new IllegalArgumentException(
+                "Election transaction initiator is not in the replica group");
+    }
+
+    private void replaceElection(
+            TransactionId currentElectionId,
+            ElectionMsg incomingMessage) {
+        activeTransactions.removeIf(transaction ->
+                transaction.getId().equals(currentElectionId));
+        electionTransactionIds.remove(incomingMessage.failedCoordinatorId);
+
+        ElectionTransaction transaction = new ElectionTransaction(
+                incomingMessage.transactionId,
+                this,
+                getEpochPair(),
+                incomingMessage.failedCoordinatorId,
+                groupOfReplicas,
+                false);
+        electionTransactionIds.put(
+                incomingMessage.failedCoordinatorId,
+                incomingMessage.transactionId);
+        scheduleTransaction(transaction);
+
+        TransactionId currentInitiator = currentElectionId;
+        if (!currentInitiator.initiator.equals(getSelf())) {
+            unicast(
+                    new ElectionTransaction.ElectionRejectMsg(
+                            currentElectionId,
+                            incomingMessage.epochPair,
+                            getSelf()),
+                    currentInitiator.initiator);
+        }
+    }
+
+    private void rejectElection(ElectionMsg message) {
+        if (message.transactionId.initiator.equals(getSelf())) {
+            return;
+        }
+
+        unicast(
+                new ElectionTransaction.ElectionRejectMsg(
+                        message.transactionId,
+                        message.epochPair,
+                        getSelf()),
+                message.transactionId.initiator);
+    }
+
+    void onElectionTransactionCancelled(
+            int failedCoordinatorId,
+            TransactionId electionTransactionId) {
+        if (electionTransactionId.equals(
+                electionTransactionIds.get(failedCoordinatorId))) {
+            electionTransactionIds.remove(failedCoordinatorId);
+        }
     }
 
     public void onSynchronizationMsg(SynchronizationMsg message) {
@@ -344,6 +507,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
         if (!completedElectionCoordinators.add(failedCoordinatorId)) {
             return;
         }
+
+        electionTransactionIds.remove(failedCoordinatorId);
 
         int maximumEpoch = 0;
         for (ElectionTransaction.ElectionCandidate candidate : candidates) {
@@ -382,6 +547,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
         if (!completedElectionCoordinators.add(message.failedCoordinatorId)) {
             return;
         }
+
+        electionTransactionIds.remove(message.failedCoordinatorId);
 
         int[] synchronizedPositions = message.getPositions();
         if (synchronizedPositions.length != positions.length) {
@@ -457,7 +624,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
                         case HeartbeatMsg _, WatchdogExpiredMsg _ -> this.pendingCrash.type == Crash.Type.Heartbeat;
                         case WriteFinishMsg _ -> this.pendingCrash.type == Crash.Type.WriteOK;
                         case ElectionMsg _, ElectionTransaction.ElectionAckMsg _,
-                                ElectionTransaction.ElectionAckTimeoutMsg _, SynchronizationMsg _ ->
+                                ElectionTransaction.ElectionAckTimeoutMsg _,
+                                ElectionTransaction.ElectionRejectMsg _, SynchronizationMsg _ ->
                                 this.pendingCrash.type == Crash.Type.Election;
                         default -> false;
                     };

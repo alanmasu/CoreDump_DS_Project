@@ -11,7 +11,8 @@ stateDiagram-v2
 
     %% Transaction object is created but not active yet.
     [*] --> NEW: constructed
-    %% Transaction participates in the election ring.
+    %% Transaction participates in the election ring after Replica startup
+    %% arbitration has selected one election transaction for this failure term.
     NEW --> PARTICIPATING: start()
 
     %% After forwarding the token, the replica first waits for the next replica's ACK and
@@ -23,10 +24,12 @@ stateDiagram-v2
         [*] --> WAITING_FOR_ACK: token forwarded
         %% ACK and timeout transitions require the current forwarding attempt/version;
         %% stale messages are ignored without changing state.
-        WAITING_FOR_ACK --> WAITING_FOR_TOKEN: ElectionAck / cancel timer
-        WAITING_FOR_ACK --> WAITING_FOR_ACK: ElectionAckTimeout / skip + resend
-        WAITING_FOR_ACK --> WAITING_FOR_ACK: ElectionMsg / ACK + forward
-        WAITING_FOR_TOKEN --> WAITING_FOR_ACK: ElectionMsg / ACK + forward
+    WAITING_FOR_ACK --> WAITING_FOR_TOKEN: ElectionAck / cancel timer
+    WAITING_FOR_ACK --> WAITING_FOR_ACK: ElectionAckTimeout / skip + resend
+    WAITING_FOR_ACK --> WAITING_FOR_ACK: ElectionMsg / ACK + forward
+    WAITING_FOR_ACK --> DONE: ElectionRejectMsg / cancel timer
+    WAITING_FOR_TOKEN --> WAITING_FOR_ACK: ElectionMsg / ACK + forward
+    WAITING_FOR_TOKEN --> DONE: ElectionRejectMsg
     }
 
     %% A completed token selects the local replica as the new coordinator.

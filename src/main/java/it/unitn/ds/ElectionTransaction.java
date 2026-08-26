@@ -151,6 +151,37 @@ public final class ElectionTransaction extends Transaction {
     }
 
     /**
+     * Local scheduler message used to give the replicas a deterministic
+     * opportunity to start the election in ring order.
+     */
+    public static final class ElectionStartMsg extends Msg {
+
+        public final int failedCoordinatorId;
+
+        public ElectionStartMsg(
+                TransactionId transactionId,
+                EpochPair epochPair,
+                ActorRef sender,
+                int failedCoordinatorId) {
+            super(transactionId, epochPair, sender);
+            this.failedCoordinatorId = failedCoordinatorId;
+        }
+    }
+
+    /**
+     * Network message telling a competing election transaction to stop.
+     */
+    public static final class ElectionRejectMsg extends Msg {
+
+        public ElectionRejectMsg(
+                TransactionId transactionId,
+                EpochPair epochPair,
+                ActorRef sender) {
+            super(transactionId, epochPair, sender);
+        }
+    }
+
+    /**
      * Network message announcing the elected coordinator and carrying the
      * authoritative replica snapshot.
      */
@@ -384,6 +415,13 @@ public final class ElectionTransaction extends Transaction {
         }
     }
 
+    private long electionAckTimeoutMillis(Replica replica) {
+        // The receiver sends the ACK only after forwarding the token. The
+        // sender therefore needs time for the token and the ACK to make a
+        // complete round trip through the network.
+        return 2L * replica.getMaxLatencyPlusTolerance();
+    }
+
     private ElectionMsg createOutgoingMessage(
             Replica replica,
             List<ElectionCandidate> candidates) {
@@ -414,7 +452,7 @@ public final class ElectionTransaction extends Transaction {
 
         replica.unicast(outgoing, target);
         timeout = replica.scheduleToItself(
-                replica.getMaxLatencyPlusTolerance(),
+                electionAckTimeoutMillis(replica),
                 new ElectionAckTimeoutMsg(
                         getId(),
                         startEpochPair,
@@ -546,6 +584,19 @@ public final class ElectionTransaction extends Transaction {
         pendingTargetId = -1;
     }
 
+    private void handleRejection() {
+        cancelPendingTimeout();
+        pendingMessage = null;
+        pendingTargetId = -1;
+        state = State.DONE;
+
+        Replica replica = getReplicaOwner();
+        replica.onElectionTransactionCancelled(
+                failedCoordinatorId,
+                getId());
+        replica.onTransactionComplete(this);
+    }
+
     private void handleTimeout(
             ElectionAckTimeoutMsg timeoutMessage) {
         if (pendingMessage == null
@@ -590,6 +641,11 @@ public final class ElectionTransaction extends Transaction {
 
         if (msg instanceof ElectionAckMsg) {
             handleAcknowledgement((ElectionAckMsg) msg);
+            return;
+        }
+
+        if (msg instanceof ElectionRejectMsg) {
+            handleRejection();
             return;
         }
 
