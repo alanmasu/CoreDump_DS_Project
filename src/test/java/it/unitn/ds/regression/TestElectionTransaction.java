@@ -6,36 +6,44 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
+import akka.actor.Actor;
+import akka.actor.ActorRef;
+import it.unitn.ds.AbstractReplica;
+import it.unitn.ds.AbstractReplica.CoordinatorElected;
 import java.util.ArrayList;
 import java.util.List;
+import java.time.Duration;
 import java.util.Set;
 
 import it.unitn.ds.ElectionTransaction;
 import it.unitn.ds.EpochPair;
 import it.unitn.ds.ElectionTransaction.ElectionCandidate;
+import it.unitn.ds.ElectionTransaction.SynchronizationMsg;
+import it.unitn.ds.TestsCommons;
+import it.unitn.ds.TestsCommons.TestsSystemWrapper;
 import it.unitn.ds.Transaction.TransactionId;
 
 import org.junit.jupiter.api.Test;
 
-public class TestElectionTransaction {
+class TestElectionTransaction {
 
     @Test
     void newerSequenceWinsWhenEpochIsEqual() {
-        ElectionCandidate older = 
+        ElectionCandidate older =
             new ElectionCandidate(3, new EpochPair(2, 3));
 
-        ElectionCandidate newer = 
+        ElectionCandidate newer =
             new ElectionCandidate(2, new EpochPair(2, 4));
-        
+
         assertTrue(newer.compareTo(older) > 0);
         assertTrue(older.compareTo(newer) < 0);
     }
 
     @Test
     void newerEpochWinsOverHigherSequence() {
-        ElectionCandidate olderEpoch = 
+        ElectionCandidate olderEpoch =
             new ElectionCandidate(9, new EpochPair(2, 99));
-        
+
         ElectionCandidate newerEpoch =
             new ElectionCandidate(0, new EpochPair(3, 0));
 
@@ -48,10 +56,10 @@ public class TestElectionTransaction {
     void higherReplicaIdBreaksEqualEpochPairTie() {
         ElectionCandidate lowerId =
             new ElectionCandidate(2, new EpochPair(2, 4));
-        
+
         ElectionCandidate higherId =
             new ElectionCandidate(5, new EpochPair(2, 4));
-        
+
         assertTrue(higherId.compareTo(lowerId) > 0);
         assertTrue(lowerId.compareTo(higherId) < 0);
     }
@@ -97,7 +105,7 @@ public class TestElectionTransaction {
         ElectionTransaction.RingNavigation ring =
             new ElectionTransaction.RingNavigation(
                 List.of(0, 2, 3, 5));
-        
+
         assertEquals(3, ring.nextReplicaId(2, Set.of()));
         assertEquals(0, ring.nextReplicaId(5, Set.of()));
         assertEquals(5, ring.nextReplicaId(2, Set.of(3)));
@@ -197,5 +205,112 @@ public class TestElectionTransaction {
         assertArrayEquals(
                 new int[] {1, 2, 3},
                 message.getPositions());
+    }
+
+    @Test
+    void synchronizationFromUnexpectedReplicaIsIgnored() {
+        TestsSystemWrapper system =
+                TestsCommons.createTestSystem("unexpectedSynchronizationSender", 3, 0, 1, 5);
+
+        try {
+            ActorRef follower = system.actors.get(1);
+            SynchronizationMsg synchronization =
+                    new SynchronizationMsg(
+                            new TransactionId(system.actors.get(1), -1),
+                            new EpochPair(1, 0),
+                            system.actors.get(1),
+                            0,
+                            2,
+                            new EpochPair(1, 0),
+                            new int[AbstractReplica.POSITIONS_LIST_LENGTH]);
+
+            follower.tell(synchronization, Actor.noSender());
+
+            system.probes.get(1).expectNoMessage(Duration.ofMillis(250));
+        } finally {
+            system.system.terminate();
+        }
+    }
+
+    @Test
+    void invalidSynchronizationDoesNotPoisonElectionTerm() {
+        TestsSystemWrapper system =
+                TestsCommons.createTestSystem("invalidSynchronizationTerm", 3, 0, 1, 5);
+
+        try {
+            ActorRef follower = system.actors.get(1);
+            TransactionId synchronizationId =
+                    new TransactionId(system.actors.get(2), -1);
+            EpochPair newEpochPair = new EpochPair(1, 0);
+
+            SynchronizationMsg invalidSynchronization =
+                    new SynchronizationMsg(
+                            synchronizationId,
+                            newEpochPair,
+                            system.actors.get(2),
+                            0,
+                            2,
+                            newEpochPair,
+                            new int[0]);
+            follower.tell(invalidSynchronization, Actor.noSender());
+            system.probes.get(1).expectNoMessage(Duration.ofMillis(250));
+
+            SynchronizationMsg validSynchronization =
+                    new SynchronizationMsg(
+                            synchronizationId,
+                            newEpochPair,
+                            system.actors.get(2),
+                            0,
+                            2,
+                            newEpochPair,
+                            new int[AbstractReplica.POSITIONS_LIST_LENGTH]);
+            follower.tell(validSynchronization, Actor.noSender());
+
+            CoordinatorElected elected =
+                    system.probes.get(1).expectMsgClass(
+                            Duration.ofSeconds(1), CoordinatorElected.class);
+            assertEquals(2, elected.newCoordinatorId);
+            assertEquals(1, elected.replicaId);
+        } finally {
+            system.system.terminate();
+        }
+    }
+
+    @Test
+    void malformedElectionMessageIsIgnoredBeforeRouting() {
+        TestsSystemWrapper system =
+                TestsCommons.createTestSystem("malformedElectionMessage", 3, 0, 1, 5);
+
+        try {
+            ActorRef follower = system.actors.get(1);
+            ElectionTransaction.ElectionMsg malformedElection =
+                    new ElectionTransaction.ElectionMsg(
+                            null,
+                            new EpochPair(0, 0),
+                            system.actors.get(2),
+                            0,
+                            List.of(new ElectionCandidate(2, new EpochPair(0, 0))));
+            follower.tell(malformedElection, Actor.noSender());
+            system.probes.get(1).expectNoMessage(Duration.ofMillis(250));
+
+            EpochPair newEpochPair = new EpochPair(1, 0);
+            SynchronizationMsg validSynchronization =
+                    new SynchronizationMsg(
+                            new TransactionId(system.actors.get(2), -1),
+                            newEpochPair,
+                            system.actors.get(2),
+                            0,
+                            2,
+                            newEpochPair,
+                            new int[AbstractReplica.POSITIONS_LIST_LENGTH]);
+            follower.tell(validSynchronization, Actor.noSender());
+
+            CoordinatorElected elected =
+                    system.probes.get(1).expectMsgClass(
+                            Duration.ofSeconds(1), CoordinatorElected.class);
+            assertEquals(2, elected.newCoordinatorId);
+        } finally {
+            system.system.terminate();
+        }
     }
 }

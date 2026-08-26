@@ -36,6 +36,8 @@ stateDiagram-v2
     WAITING_FOR_ACK --> ELECTED: completed token [winner] / cancel timeout
     WAITING_FOR_TOKEN --> ELECTED: completed token [winner]
     %% A non-winner learns the result from the elected coordinator.
+    %% Replica accepts only a synchronization from the announced coordinator
+    %% for the current failed-coordinator term and a newer epoch.
     PARTICIPATING --> SYNCHRONIZING: SynchronizationMsg / cancel timer
     %% The winner prepares authoritative history and announces the new term.
     ELECTED --> SYNCHRONIZING: history ready / broadcast sync

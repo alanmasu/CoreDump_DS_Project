@@ -27,24 +27,24 @@ sequenceDiagram
         Note right of R3: WAITING_FOR_ACK
 
         Note right of R4: Create local ElectionTransaction<br/>Add candidate R4=pair(2,5)
-        R4 ->> R3: ElectionAckMsg()
         R4 ->> R2: ElectionMsg(failedCoordinator=R1, {R3=pair(2,4), R4=pair(2,5)})
+        R4 ->> R3: ElectionAckMsg()
         R4 ->> S: schedule round-trip ElectionAckTimeout
         Note right of R4: WAITING_FOR_ACK
 
         Note right of R3: Cancel timeout<br/>WAITING_FOR_TOKEN
 
         Note right of R2: Create local ElectionTransaction<br/>Add candidate R2=pair(2,3)
-        R2 ->> R4: ElectionAckMsg()
         R2 ->> R3: ElectionMsg(failedCoordinator=R1, {R2=pair(2,3), R3=pair(2,4), R4=pair(2,5)})
+        R2 ->> R4: ElectionAckMsg()
         R2 ->> S: schedule round-trip ElectionAckTimeout
         Note right of R2: WAITING_FOR_ACK
 
         Note right of R4: Cancel timeout<br/>WAITING_FOR_TOKEN
 
-        R3 ->> R2: ElectionAckMsg()
         Note right of R3: Candidate already present<br/>Local replica is not winner
         R3 ->> R4: ElectionMsg(failedCoordinator=R1, {R2=pair(2,3), R3=pair(2,4), R4=pair(2,5)})
+        R3 ->> R2: ElectionAckMsg()
         R3 ->> S: schedule round-trip ElectionAckTimeout
         Note right of R3: WAITING_FOR_ACK
 
@@ -62,8 +62,8 @@ sequenceDiagram
         R4 ->> R3: SynchronizationMsg(failedCoordinator=R1, coordinator=R4, epoch=3:0, positions)
         Note right of R4: SYNCHRONIZING
 
-        Note right of R2: Apply positions snapshot<br/>Install R4 and epoch 3:0<br/>DONE
-        Note right of R3: Apply positions snapshot<br/>Install R4 and epoch 3:0<br/>DONE
+        Note right of R2: Validate sender and newer epoch<br/>Apply positions snapshot<br/>Install R4 and epoch 3:0<br/>DONE
+        Note right of R3: Validate sender and newer epoch<br/>Apply positions snapshot<br/>Install R4 and epoch 3:0<br/>DONE
 
         Note right of R4: Synchronization completed<br/>DONE<br/>Start heartbeat and resume writes
     end

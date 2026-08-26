@@ -13,6 +13,7 @@ import it.unitn.ds.ElectionTransaction.ElectionStartMsg;
 import it.unitn.ds.ElectionTransaction.SynchronizationMsg;
 import java.util.LinkedList;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -74,7 +75,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.startedElectionCoordinators = new HashSet<>();
         this.scheduledElectionCoordinators = new HashSet<>();
         this.completedElectionCoordinators = new HashSet<>();
-        this.electionTransactionIds = new java.util.HashMap<>();
+        this.electionTransactionIds = new HashMap<>();
     }
 
     public static Props props(int id, int minLatency, int maxLatency, int coordinatorBeatInterval) {
@@ -373,6 +374,10 @@ public class Replica extends AbstractReplica implements DistributedActor {
             return;
         }
 
+        if (!isValidElectionMessage(message)) {
+            return;
+        }
+
         if (completedElectionCoordinators.contains(message.failedCoordinatorId)) {
             return;
         }
@@ -417,6 +422,30 @@ public class Replica extends AbstractReplica implements DistributedActor {
         callbackOnElectionStarted(message.failedCoordinatorId);
         scheduleTransaction(transaction);
         onMessage(message);
+    }
+
+    private boolean isValidElectionMessage(ElectionMsg message) {
+        if (message == null
+                || message.transactionId == null
+                || message.transactionId.initiator == null
+                || message.sender == null
+                || !groupOfReplicas.containsValue(message.sender)
+                || !groupOfReplicas.containsValue(message.transactionId.initiator)
+                || !groupOfReplicas.containsKey(message.failedCoordinatorId)
+                || message.failedCoordinatorId == getId()) {
+            return false;
+        }
+
+        Set<Integer> candidateIds = new HashSet<>();
+        for (ElectionTransaction.ElectionCandidate candidate : message.candidates) {
+            if (!groupOfReplicas.containsKey(candidate.getReplicaId())
+                    || candidate.getReplicaId() == message.failedCoordinatorId
+                    || !candidateIds.add(candidate.getReplicaId())) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private boolean isIncomingElectionPreferred(
@@ -497,7 +526,38 @@ public class Replica extends AbstractReplica implements DistributedActor {
         if (this.replicaStatus == CrashStatus.CRASHED) {
             return;
         }
+
+        if (!isValidSynchronization(message)) {
+            return;
+        }
+
         applySynchronization(message);
+    }
+
+    private boolean isValidSynchronization(SynchronizationMsg message) {
+        if (message == null
+                || message.transactionId == null
+                || message.epochPair == null
+                || message.sender == null
+                || message.failedCoordinatorId == message.newCoordinatorId
+                || coordinatorID != message.failedCoordinatorId) {
+            return false;
+        }
+
+        ActorRef announcedCoordinator = groupOfReplicas.get(message.newCoordinatorId);
+        if (announcedCoordinator == null
+                || !announcedCoordinator.equals(message.sender)
+                || !message.epochPair.equals(message.newEpochPair)) {
+            return false;
+        }
+
+        EpochPair currentEpochPair = getEpochPair();
+        if (currentEpochPair != null
+                && message.newEpochPair.compareTo(currentEpochPair) <= 0) {
+            return false;
+        }
+
+        return message.getPositions().length == positions.length;
     }
 
     void completeElectionAsWinner(
@@ -509,6 +569,12 @@ public class Replica extends AbstractReplica implements DistributedActor {
         }
 
         electionTransactionIds.remove(failedCoordinatorId);
+        ElectionTransaction electionTransaction = findElectionTransaction(
+                failedCoordinatorId,
+                electionTransactionId);
+        if (electionTransaction != null) {
+            electionTransaction.enterSynchronizing();
+        }
 
         int maximumEpoch = 0;
         for (ElectionTransaction.ElectionCandidate candidate : candidates) {
@@ -549,6 +615,13 @@ public class Replica extends AbstractReplica implements DistributedActor {
         }
 
         electionTransactionIds.remove(message.failedCoordinatorId);
+        for (Transaction transaction : activeTransactions) {
+            if (transaction instanceof ElectionTransaction
+                    && ((ElectionTransaction) transaction).getFailedCoordinatorId()
+                            == message.failedCoordinatorId) {
+                ((ElectionTransaction) transaction).enterSynchronizing();
+            }
+        }
 
         int[] synchronizedPositions = message.getPositions();
         if (synchronizedPositions.length != positions.length) {
@@ -587,10 +660,31 @@ public class Replica extends AbstractReplica implements DistributedActor {
     }
 
     private void removeElectionTransactions(int failedCoordinatorId) {
+        for (Transaction transaction : activeTransactions) {
+            if (transaction instanceof ElectionTransaction
+                    && ((ElectionTransaction) transaction).getFailedCoordinatorId()
+                            == failedCoordinatorId) {
+                ((ElectionTransaction) transaction).complete();
+            }
+        }
         activeTransactions.removeIf(transaction ->
                 transaction instanceof ElectionTransaction
                         && ((ElectionTransaction) transaction)
                                 .getFailedCoordinatorId() == failedCoordinatorId);
+    }
+
+    private ElectionTransaction findElectionTransaction(
+            int failedCoordinatorId,
+            TransactionId electionTransactionId) {
+        for (Transaction transaction : activeTransactions) {
+            if (transaction instanceof ElectionTransaction
+                    && transaction.getId().equals(electionTransactionId)
+                    && ((ElectionTransaction) transaction).getFailedCoordinatorId()
+                            == failedCoordinatorId) {
+                return (ElectionTransaction) transaction;
+            }
+        }
+        return null;
     }
 
     /// For testing

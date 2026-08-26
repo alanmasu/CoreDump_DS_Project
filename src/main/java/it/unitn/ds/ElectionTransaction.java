@@ -13,7 +13,7 @@ import java.util.Arrays;
 import akka.actor.ActorRef;
 
 public final class ElectionTransaction extends Transaction {
-    
+
     private enum State {
         NEW,
         PARTICIPATING,
@@ -81,14 +81,14 @@ public final class ElectionTransaction extends Transaction {
         this.state = State.NEW;
     }
     /**
-     * 
+     *
      * Network message carrying the election token around the ring.
-     * 
+     *
      * The candidate list is copied when the message is create, so later changes to the caller's list
      * cannot modify a message already in transit.
      */
     public static final class ElectionMsg extends Msg {
-        
+
         public final int failedCoordinatorId;
         public final List<ElectionCandidate> candidates;
 
@@ -98,7 +98,7 @@ public final class ElectionTransaction extends Transaction {
             ActorRef sender,
             int failedCoordinatorId,
             List<ElectionCandidate> candidates
-        ) 
+        )
         {
             super(transactionId, epochPair, sender);
             this.failedCoordinatorId = failedCoordinatorId;
@@ -113,7 +113,7 @@ public final class ElectionTransaction extends Transaction {
 
     /**
      * Network message acknowledging receipt of an election token.
-     * 
+     *
      * The sender is the replica that received the election message.
      * The transaction ID identifies which election token is being acknowledged.
      */
@@ -126,7 +126,7 @@ public final class ElectionTransaction extends Transaction {
 
     /**
      * Local scheduler message used when a replica is waiting for an ACK.
-     * 
+     *
      * This message never crosses the network. It is delivered to the owning replica's mailbox.
      */
     public static final class ElectionAckTimeoutMsg extends Msg {
@@ -220,7 +220,7 @@ public final class ElectionTransaction extends Transaction {
 
     // TODO: Need javadoc here
     public static final class ElectionCandidate implements Comparable<ElectionCandidate>, Serializable {
-        
+
         private static final long serialVersionUID = 1L;
         private final int replicaId;
         private final boolean hasObservedUpdate;
@@ -278,7 +278,7 @@ public final class ElectionTransaction extends Transaction {
 
 
     public static final class RingNavigation {
-        
+
         private final List<Integer> ringReplicaIds;
 
         public RingNavigation(List<Integer> replicaIds) {
@@ -319,7 +319,7 @@ public final class ElectionTransaction extends Transaction {
                 throw new IllegalArgumentException(
                     "current replica is not part of the ring");
             }
-            
+
             // We need a for loop here since if an element is unavailable, we need to increment
             // the offset and go look at the next element.
             for (int offset = 1; offset < ringReplicaIds.size(); offset++) {
@@ -413,6 +413,17 @@ public final class ElectionTransaction extends Transaction {
             timeout.cancel();
             timeout = null;
         }
+    }
+
+    void enterSynchronizing() {
+        if (state == State.PARTICIPATING || state == State.ELECTED) {
+            state = State.SYNCHRONIZING;
+        }
+    }
+
+    void complete() {
+        cancelPendingTimeout();
+        state = State.DONE;
     }
 
     private long electionAckTimeoutMillis(Replica replica) {
@@ -585,10 +596,9 @@ public final class ElectionTransaction extends Transaction {
     }
 
     private void handleRejection() {
-        cancelPendingTimeout();
+        complete();
         pendingMessage = null;
         pendingTargetId = -1;
-        state = State.DONE;
 
         Replica replica = getReplicaOwner();
         replica.onElectionTransactionCancelled(
@@ -616,7 +626,7 @@ public final class ElectionTransaction extends Transaction {
                 timeoutMessage.expectedTargetId);
 
         if (remainingCandidates.isEmpty()) {
-            state = State.DONE;
+            complete();
             return;
         }
 
