@@ -16,7 +16,7 @@ public class TestsCommons {
 
     public static final int TEST_INDEX = 0;
     public static final int TEST_VALUE = 10;
-    public static final int TEST_COORDINATOR_BEAT_INTERVAL = AbstractReplica.COORDINATOR_BEAT_INTERVAL;
+    public static int TEST_COORDINATOR_BEAT_INTERVAL = AbstractReplica.COORDINATOR_BEAT_INTERVAL;
 
     public static final boolean DO_PRINTS = false;
     public static final boolean DO_DEBUG_PRINTS = false;
@@ -56,7 +56,7 @@ public class TestsCommons {
         }
     }
 
-    public static TestsSystemWrapper createTestSystem(String name, int n_actors, int coordinator, int min_latency, int max_latency) {
+    public static TestsSystemWrapper createTestSystem(String name, int n_actors, int coordinator, int min_latency, int max_latency, int heartbeat_interval) {
         assert (coordinator < n_actors);
         final ActorSystem system = ActorSystem.create(name);
 
@@ -73,7 +73,7 @@ public class TestsCommons {
             TestKit probe = new TestKit(system);
             probes.put(i, probe);
             group.put(i, system.actorOf(
-                            Replica.propsWithListener(i, min_latency, max_latency, TEST_COORDINATOR_BEAT_INTERVAL,probe.getRef()),
+                            Replica.propsWithListener(i, min_latency, max_latency, heartbeat_interval,probe.getRef()),
                             "Replica_" + i)
             );
         }
@@ -82,8 +82,12 @@ public class TestsCommons {
         for (Map.Entry<Integer, ActorRef> entry : group.entrySet()) {
             entry.getValue().tell(initMsg, ActorRef.noSender());
         }
-
+        TestsCommons.TEST_COORDINATOR_BEAT_INTERVAL = heartbeat_interval;
         return new TestsSystemWrapper(system, group, probes);
+    }
+
+    public static TestsSystemWrapper createTestSystem(String name, int n_actors, int coordinator, int min_latency, int max_latency) {
+        return createTestSystem(name, n_actors, coordinator, min_latency, max_latency, AbstractReplica.COORDINATOR_BEAT_INTERVAL);
     }
 
     public static TestsSystemWrapper createTestSystem(String name, int n_actors, int coordinator) {
