@@ -1,0 +1,49 @@
+\section{Project Structure}
+
+\subsection{Objective and execution model}
+
+The system implements a replicated, fixed-length array of integer positions. Clients may contact any replica; reads are answered locally, whereas a distinguished coordinator orders writes. Every client, replica, and emulated point-to-point channel is a Java Akka actor that owns its mutable state and processes one mailbox event at a time. The design assumes static membership, reliable FIFO channels, fail-stop replicas without recovery, accurate bounded failure detection, and a strict majority of correct replicas.
+
+Figure~\ref{fig:architecture} shows the normal request path. An arrow between replicas denotes a dedicated \code{NetworkChannel} actor for that sender--destination pair. The channel queues messages and adds a controlled random delay, but releases the queue head first; therefore latency never reorders messages sent over the same logical channel.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+    node distance=9mm and 20mm,
+    actor/.style={draw, rounded corners, minimum width=22mm, minimum height=9mm, align=center},
+    coord/.style={actor, fill=blue!10, very thick},
+    replica/.style={actor, fill=gray!8},
+    channel/.style={-{Latex[length=2mm]}, thick},
+    response/.style={{Latex[length=2mm]}-, dashed}
+]
+\node[actor] (client) {Client};
+\node[replica, right=of client] (contact) {contacted\\replica};
+\node[coord, right=of contact] (coord) {coordinator};
+\node[replica, above right=5mm and 15mm of coord] (r1) {replica $r_1$};
+\node[replica, below right=5mm and 15mm of coord] (r2) {replica $r_2$};
+\draw[channel] (client) -- node[above]{request} (contact);
+\draw[response] (client) -- node[below]{result} (contact);
+\draw[channel] (contact) -- node[above]{forward} (coord);
+\draw[channel] (coord) -- (r1);
+\draw[channel] (coord) -- (r2);
+\draw[response] (coord) to[bend right=13] (r1);
+\draw[response] (coord) to[bend left=13] (r2);
+\end{tikzpicture}
+\caption{Normal write path: solid coordinator edges carry UPDATE/WRITEOK; dashed reverse edges carry ACK.}
+\label{fig:architecture}
+\end{figure}
+
+\subsection{Responsibilities and local state}
+
+\noindent\begin{tabularx}{\textwidth}{@{}>{\bfseries}p{28mm} X X@{}}
+\toprule
+Component & Responsibility & Principal local state \\
+\midrule
+\code{Client} & Runs one public read/write operation at a time and reports results or timeouts through callbacks. & Current transaction, FIFO queue, local transaction counter. \\
+\code{Replica} & Stores the array, dispatches protocol FSMs, emulates crashes, and records the applied prefix. & $P[0\ldots99]$, coordinator, latest pair, history, active FSMs, crash state. \\
+\code{Transaction} & Encapsulates one local READ, WRITE, UPDATE, HEARTBEAT, or ELECTION FSM; it never travels. & Immutable ID and start epoch, FSM state, optional cancellable timeout. \\
+\code{NetworkChannel} & Emulates one reliable FIFO link with random latency. & FIFO queue of message/sender pairs and one scheduled delivery. \\
+\bottomrule
+\end{tabularx}
+
+Protocol messages extend immutable, serializable \code{Msg}. A \code{TransactionId = <initiator, sequence>} correlates a message with one local FSM; it is a routing key, not the database order. The replicated order is the immutable \code{EpochPair} $\langle e,i\rangle$. Heartbeats reserve transaction sequence $0$, ordinary replica FSMs use positive sequences, and elections use negative sequences. The array materializes state for reads; a \code{Map} keyed by \code{EpochPair} records applied transactions. Membership, candidate lists, and synchronization arrays are defensively copied at actor boundaries.

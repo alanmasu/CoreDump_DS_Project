@@ -1,0 +1,81 @@
+\clearpage
+\section{Implementation and Evaluation}
+
+\subsection{State-machine organization}
+
+The implementation separates actor orchestration from per-operation protocol state. \code{Client} and \code{Replica} own and dispatch transactions; each \code{Transaction} implements \code{start()}, \code{computeState(Msg)}, and a small explicit FSM. The arrangement keeps timeout variables and phase-specific data local while allowing a replica to run several updates concurrently.
+
+\noindent\begin{tabularx}{\textwidth}{@{}>{\bfseries}p{29mm} p{43mm} X@{}}
+\toprule
+FSM & Main states & Terminal event or recovery action \\
+\midrule
+READ & INIT, WAITING\_RESULT & Result returns the local value; timeout reports failure. \\
+WRITE (client) & INIT, WAITING\_RESULT & Result/timeout invokes the supplied client callback and releases the FIFO queue. \\
+WRITE (replica) & INIT, WAITING\_UPDATE & Child UPDATE completion sends the result to the originating client. \\
+UPDATE & WAITING\_UPDATE, WAITING\_ACK, WAITING\_WRITEOK, WAITING\_ELECTION & Matching WRITEOK applies exactly once; phase timeout starts election; definitely unobserved requests may resume. \\
+HEARTBEAT & COORDINATOR, WATCHING, ELECTION\_REQUESTED & Ticks broadcast liveness; a current watchdog expiration requests election. \\
+ELECTION & NEW, PARTICIPATING, ELECTED, SYNCHRONIZING & ACK timeout skips a node; winner publishes a snapshot; rejection or synchronization closes old FSMs. \\
+\bottomrule
+\end{tabularx}
+
+Message dispatch first handles messages that create transactions (READ, WRITE, UPDATE, and ELECTION tokens), then routes subsequent messages by \code{TransactionId}. Replica code iterates over a copy of the active list because a terminal transition may remove its transaction. Results sent to clients use direct actor messaging as public API traffic; all replica-to-replica protocol traffic uses \code{tell}/\code{unicast}/\code{broadcast}, and therefore crosses the emulated FIFO channels.
+
+Two different counters protect different invariants. The transaction counter provides collision-free local routing, while \code{reserveNextUpdateEpochPair()} provides database ordering. The latter is coordinator-only and increments the sequence at reservation time, but \code{Replica.epochPair} changes only when WRITEOK is applied. After synchronization, a changed epoch resets the reservation sequence above the baseline. UPDATE, ACK, WRITEOK, local state, history, and \code{WriteFinishMsg} all carry the same pair; mismatched pairs are ignored and a null pair is rejected where ordering identity is mandatory.
+
+\subsection{Observability and controlled faults}
+
+All required externally visible events use the provided \code{Logger} and callback APIs, so test probes can observe reads, writes, applied updates, election starts, and elected coordinators without shared mutable state. Official logging is timestamped by the template utility; no protocol class prints directly to standard output. Crash instructions are immutable API messages and are interpreted inside the target actor. This makes a failure reproducible at protocol boundaries while preserving normal actor isolation.
+
+The most informative recovery scenario uses five replicas. The coordinator reaches a quorum, sends WRITEOK to one follower, and crashes before completing its broadcast. That follower has pair $\langle0,1\rangle$ while the others remain at $\langle0,0\rangle$. The ring selects the follower with the greater pair, it starts epoch $1$, and synchronization copies value $42$ to all four correct replicas. This case simultaneously exercises partial broadcast, update timeout/heartbeat detection, candidate ordering, election termination, state transfer, and post-election reads.
+
+\clearpage
+\subsection{Verification strategy and results}
+
+Verification combines course tests, protocol regressions, formatting, and static analysis. Akka \code{TestKit} listeners receive mandatory callbacks, so tests primarily assert external behavior; focused probes expose identities and history where no callback exists.
+
+\noindent\begin{tabularx}{\textwidth}{@{}>{\bfseries}p{34mm} X p{25mm}@{}}
+\toprule
+Test layer & Evidence covered & Result \\
+\midrule
+Course base tests & API shape; initialization; no-crash reads/writes; crash scenarios and callback timing. & Passed \\
+Transaction regressions & Message equality/routing; read and write success/timeout; heartbeat generations; update quorum; ring navigation, ACK skipping, candidate choice, synchronization validation. & Passed \\
+Consistency regressions & Unique monotonic epoch pairs; six concurrent writes from two clients on five replicas; write-then-read program order; coordinator crash during first WRITEOK followed by convergence. & 4/4 passed \\
+Complete JUnit run & All non-contract tests in the repository. & 80/80 passed \\
+Quality checks & PMD, SpotBugs, CPD, and Spotless aggregation. & Build successful \\
+Remote CI & GitHub \code{Regression CI/run-tests} on the exact implementation head. & Passed \\
+\bottomrule
+\end{tabularx}
+
+The complete suite was run with an isolated Gradle home because the machine's default Gradle cache could not load its native Linux library. The commands were:
+
+\begin{verbatim}
+GRADLE_USER_HOME=/tmp/coredump-gradle-home gradle test --no-daemon
+GRADLE_USER_HOME=/tmp/coredump-gradle-home gradle regression --no-daemon
+GRADLE_USER_HOME=/tmp/coredump-gradle-home gradle staticAnalysis --no-daemon
+\end{verbatim}
+
+Static analysis completed with zero errors and zero formatting findings. Its 42 warnings, two informational findings, and two duplication locations are non-blocking complexity/style observations; correctness instead rests on the stated invariants and fault-oriented tests.
+
+\subsection{Requirement coverage}
+
+\noindent\begin{tabularx}{\textwidth}{@{}p{43mm} X@{}}
+\toprule
+Required property & Implementation mechanism \\
+\midrule
+Reliable total-order update delivery & Coordinator pairs, strict-majority ACK, apply-on-WRITEOK, and FIFO channels. \\
+Sequential client observations & One active client transaction, FIFO pending queue, and result only after contacted-replica application. \\
+Coordinator crash detection & UPDATE/WRITEOK phase deadlines plus versioned heartbeat watchdog. \\
+Ring election with crashes & Sorted IDs, immutable candidate token, per-hop ACK timeout, failed-node skipping, and finite candidate reduction. \\
+Most up-to-date coordinator & Lexicographic latest-pair comparison with replica-ID tie-break. \\
+Post-election convergence & Strictly newer epoch and immutable full-array synchronization before new-epoch traffic. \\
+Specific crash points and encapsulation & Per-message crash counters, interruptible broadcast, actor-owned state, and defensive copies. \\
+\bottomrule
+\end{tabularx}
+
+\subsection{Use of artificial intelligence}
+
+OpenAI Codex was used to assist in code and text generation. The authors reviewed and tested the generated material; responsibility for the design, code, report, and oral explanation remains with the authors.
+
+\subsection{Conclusion}
+
+The project combines quorum broadcast, coordinator-scoped ordering, FIFO transport, and ring election. A local transaction identifier correlates an FSM; the \code{EpochPair} names a replicated decision. Preserving that pair through WRITEOK gives replicas one ordered prefix, and synchronization establishes the next epoch's baseline. The full automated suite passes, with the snapshot-recovery condition stated explicitly above.
