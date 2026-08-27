@@ -246,6 +246,7 @@ public class UpdateTransaction extends Transaction {
     }
 
     protected void termination(Replica replica, WriteOkMsg writeOkMsg) {
+        replica.setPosition(writeOkMsg.index, writeOkMsg.value);
         EpochPair nextEpochPair = new EpochPair(
                 replica.getEpochPair().getEpoch(), replica.getEpochPair().getSequence() + 1);
         replica.setEpochPair(nextEpochPair);
