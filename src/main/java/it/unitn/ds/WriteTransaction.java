@@ -116,23 +116,29 @@ public class WriteTransaction extends Transaction {
 
     @Override
     public void start() {
-        owner.debug("Started WriteTransaction: " + this.getId());
+        owner.debug("Started WriteTransaction: " + this.getId() + " | index: " + this.index + " value: " + this.value);
+        if (this.state != WriteTransactionState.INIT) {
+            throw new IllegalStateException("Cannot start WriteTransaction in state: " + this.state);
+        }
         if (this.owner instanceof Client) {
             Client client = (Client) this.owner;
             client.unicast(startParameters.initialMsg, startParameters.targetActor);
             state = WriteTransactionState.WAITING_RESULT;
             this.timeout = client.scheduleToItself(
                     client.getWriteTimeoutDelay(), new WriteTimeoutMsg(this.getId(), null, client.getSelf()));
+        } else if (this.owner instanceof Replica) {
+            Replica replica = (Replica) this.owner;
+            this.state = WriteTransactionState.WAITING_UPDATE;
+            Transaction transaction = new UpdateTransaction(
+                    replica.getNextTransactionId(),
+                    replica,
+                    this.startEpochPair,
+                    this.index,
+                    this.value,
+                    replica.getCoordinator(),
+                    this.getId());
+            replica.scheduleTransaction(transaction);
         }
-        // // TODO: Create a new UpdateTransaction for the replica to handle the update
-        // else if(this.owner instanceof Replica) {
-        //     // Replica replica = (Replica) this.owner;
-        //     // this.state = WriteTransactionState.WAITING_UPDATE;
-        //     // Transaction transaction = new UpdateTransaction(replica.getNextTransactionId(), replica,
-        // this.startEpochPair, this.index, this.value, this.destination);
-        //     // replica.scheduleTransaction(transaction);
-        // }
-
     }
     ////////////////////////////////////////////
 

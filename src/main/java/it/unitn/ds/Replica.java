@@ -8,21 +8,26 @@ import it.unitn.ds.ProbeTransaction.ProbeMsg;
 import it.unitn.ds.ReadTransaction.ReadMsg;
 import it.unitn.ds.ReadTransaction.ReadResultMsg;
 import it.unitn.ds.Transaction.TransactionId;
+import it.unitn.ds.UpdateTransaction.UpdateAckMsg;
+import it.unitn.ds.UpdateTransaction.UpdateMsg;
+import it.unitn.ds.UpdateTransaction.UpdateTimeoutMsg;
+import it.unitn.ds.UpdateTransaction.WriteOkMsg;
+import it.unitn.ds.UpdateTransaction.WriteOkTimeoutMsg;
 import it.unitn.ds.WriteTransaction.WriteFinishMsg;
 import it.unitn.ds.WriteTransaction.WriteMsg;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 public class Replica extends AbstractReplica implements DistributedActor {
-
     private static final int INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE = 0;
     private Map<Integer, ActorRef> groupOfReplicas;
+    private Map<EpochPair, UpdateTransaction> updateHistory;
     private List<Transaction> activeTransactions;
     private int transactionCounter;
     private EpochPair epochPair;
-
     private int positions[];
     private int coordinatorID;
 
@@ -36,7 +41,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     private CrashStatus replicaStatus;
     private int crashCount;
     private AbstractReplica.Crash pendingCrash;
-    ////////////////////////////////////////////
+    ///////////////////////////////////////
 
     // Manages heartbeat sending or coordinator monitoring for this Replica
     private HeartbeatTransaction heartbeatTransaction;
@@ -58,6 +63,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.crashCount = 0;
         this.activeTransactions = new LinkedList<>();
         this.transactionCounter = 0;
+        this.updateHistory = new HashMap<>();
+        this.epochPair = new EpochPair(0, 0);
     }
 
     public static Props props(int id, int minLatency, int maxLatency, int coordinatorBeatInterval) {
@@ -88,6 +95,10 @@ public class Replica extends AbstractReplica implements DistributedActor {
                     "Index must be between 0 and " + (AbstractReplica.POSITIONS_LIST_LENGTH - 1));
         }
         positions[index] = value;
+    }
+
+    public ActorRef getCoordinator() {
+        return groupOfReplicas.get(coordinatorID);
     }
 
     ///////////// Sending helpers ////////////
@@ -142,6 +153,13 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.tell(msg, target);
         updateCrashStatusCallback(msg);
     }
+
+    /**
+     * This method returns true if the replica is currently the coordinator.
+     */
+    public boolean isCoordinator() {
+        return this.id == this.coordinatorID;
+    }
     ////////////////////////////////////////////
 
     @Override
@@ -157,7 +175,13 @@ public class Replica extends AbstractReplica implements DistributedActor {
             throw new IllegalStateException("Cannot initialize heartbeat: coordinator is not in the replica group.");
         }
 
-        TransactionId heartbeatTransactionId = new TransactionId(coordinator, INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE);
+        TransactionId heartbeatTransactionId;
+
+        if (this.isCoordinator()) {
+            heartbeatTransactionId = this.getNextTransactionId();
+        } else {
+            heartbeatTransactionId = new TransactionId(coordinator, INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE);
+        }
 
         this.heartbeatTransaction = new HeartbeatTransaction(heartbeatTransactionId, this, getEpochPair());
 
@@ -217,10 +241,19 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.coordinatorID = coordinatorID;
     }
 
+    /**
+     * Returns the current epoch pair of the replica.
+     * @return The current epoch pair of the replica.
+     */
     public EpochPair getEpochPair() {
         return this.epochPair;
     }
 
+    /**
+     * Sets the current epoch pair of the replica.
+     * @param epochPair The new epoch pair to be set.
+     * @throws IllegalArgumentException if the provided epochPair is null or if it is less than the current epochPair.
+     */
     public void setEpochPair(EpochPair epochPair) throws IllegalArgumentException {
         if (epochPair == null) {
             throw new IllegalArgumentException("EpochPair cannot be null");
@@ -235,10 +268,27 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.epochPair = epochPair;
     }
 
+    /**
+     * Returns the update history of the replica, which is a map of epoch pairs to their corresponding UpdateTransaction.
+     * @return A map containing the update history of the replica.
+     */
+    public Map<EpochPair, UpdateTransaction> getUpdateHistory() {
+        return new HashMap<>(this.updateHistory);
+    }
+
+    /**
+     * Adds an UpdateTransaction to the update history of the replica.
+     * @param updateTransaction The UpdateTransaction to be added to the history.
+     */
+    public void addUpdateToHistory(UpdateTransaction updateTransaction) {
+        this.updateHistory.put(getEpochPair(), updateTransaction);
+    }
+
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
                 .match(ReadMsg.class, this::onReadMsg)
+                .match(UpdateMsg.class, this::onUpdateMsg)
                 .match(WriteMsg.class, this::onWriteMsg)
                 // Handle TestMsg messages, leave it as last
                 .match(ProbeMsg.class, this::onProbeMsg)
@@ -279,6 +329,18 @@ public class Replica extends AbstractReplica implements DistributedActor {
                 msg.sender);
     }
 
+    void onUpdateMsg(UpdateMsg msg) {
+        // debug("Received UpdateMsg for transaction: " + msg.transactionId);
+        // debug("Received UpdateMsg [index: " + msg.index + ", value: " + msg.value + "]");
+        if (!msg.transactionId.initiator.equals(this.getSelf())) {
+            UpdateTransaction transaction =
+                    new UpdateTransaction(msg.transactionId, this, msg.epochPair, msg.index, msg.value, msg.sender);
+            this.scheduleTransaction(transaction);
+        } else {
+            onMessage(msg);
+        }
+    }
+
     /// For testing
     public void onProbeMsg(ProbeMsg msg) {
         if (ProbeTransaction.MSG_START.equals(msg.content)) {
@@ -297,11 +359,9 @@ public class Replica extends AbstractReplica implements DistributedActor {
     }
 
     /**
-     * This callback method is invoked whenever a message is received by the replica and the parameter allows to differentiate the type of message.
-     * The callback then checks if the replica is in a pending crash state and if the type of message matches the pending crash type.
-     * If so, it increments the crash count and checks if it has reached the threshold for crashing.
-     * If the threshold is met, the replica's status is updated to CRASHED.
-     * @param crashType Enum representing the type of message received, used to determine if the replica should crash and if to increment the crash count.
+     * This callback handles the counting of messages received by the replica when a pending crash is set.
+     * Call this method passing the handled message to update accordingly to its type and the pending crash type.
+     * @param msg The message handled by the replica.
      */
     void updateCrashStatusCallback(Msg msg) {
         if (this.replicaStatus == CrashStatus.PENDING) {
@@ -309,6 +369,9 @@ public class Replica extends AbstractReplica implements DistributedActor {
                     switch (msg) {
                         case HeartbeatMsg _, WatchdogExpiredMsg _ -> this.pendingCrash.type == Crash.Type.Heartbeat;
                         case WriteFinishMsg _ -> this.pendingCrash.type == Crash.Type.WriteOK;
+                        case UpdateMsg _, UpdateTimeoutMsg _, UpdateAckMsg _, WriteOkMsg _, WriteOkTimeoutMsg _ -> {
+                            yield this.pendingCrash.type == Crash.Type.Update;
+                        }
                         default -> false;
                     };
 
