@@ -27,6 +27,7 @@ class TestReadTransaction {
     static final int NODES_N = 3;
     static final int COORDINATOR_ID = 0;
     TestsSystemWrapper sys;
+    TestKit replicaProbe;
     TestKit clientProbe;
     TestActorRef<Replica> replica;
     TestActorRef<Client> client;
@@ -39,13 +40,15 @@ class TestReadTransaction {
     @BeforeEach
     void setup() {
         sys = TestsCommons.createTestSystem("oneClientWrite_" + COORDINATOR_ID, NODES_N, COORDINATOR_ID);
+        replicaProbe = new TestKit(sys.system);
         replica = TestActorRef.create(
                 sys.system,
-                Replica.props(
+                Replica.propsWithListener(
                         NODES_N + 1,
                         AbstractReplica.MIN_LATENCY,
                         AbstractReplica.MAX_LATENCY,
-                        TestsCommons.TEST_COORDINATOR_BEAT_INTERVAL),
+                        TestsCommons.TEST_COORDINATOR_BEAT_INTERVAL,
+                        replicaProbe.getRef()),
                 String.format("%d", NODES_N + 1));
         clientProbe = new TestKit(sys.system);
         client = TestActorRef.create(
@@ -81,6 +84,7 @@ class TestReadTransaction {
         ReadRequest readRequest = new ReadRequest(0, replica);
         Crash replicaCrash = new Crash(Crash.Type.Now, 0);
         replica.tell(replicaCrash, ActorRef.noSender());
+        replicaProbe.expectMsgClass(Crash.class);
         client.tell(readRequest, ActorRef.noSender());
 
         // Expecting a timeout message since the read timeout is set to 100ms
