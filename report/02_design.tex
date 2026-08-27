@@ -1,0 +1,83 @@
+\clearpage
+\section{System Design}
+
+\subsection{Client operations and the normal update protocol}
+
+The client maintains one \code{currentTransaction} and a FIFO queue. A new operation starts only after the previous one returns or reaches its terminal timeout. This is stronger than the required ordering for operations from one client to one replica because it preserves that client's order even when destinations differ.
+
+For a \textbf{read}, \code{ReadTransaction} sends \msg{ReadMsg(idx)} to the selected replica and schedules a local timeout. A live replica validates the index through \code{getPosition}, reads its current array entry, and immediately returns \msg{ReadResultMsg}. The result or the timeout completes the transaction and starts the next queued request.
+
+For a \textbf{write} $w=(idx,val)$, the contacted replica creates a WRITE FSM, which starts the UPDATE FSM below:
+
+\begin{enumerate}[leftmargin=7mm,itemsep=1mm,topsep=1mm]
+    \item A non-coordinator forwards $w$ to its known coordinator and waits for \msg{UPDATE}. If the contacted replica is the coordinator, it enters the coordinator path directly.
+    \item The coordinator reserves one fresh pair $\langle e,i\rangle$ in mailbox order and broadcasts \msg{UPDATE($\langle e,i\rangle$,idx,val)}. The allocator is separate from the latest applied pair, so an assigned but uncommitted operation is not presented as committed state.
+    \item Each receiving replica creates or advances the matching update FSM, returns \msg{ACK($\langle e,i\rangle$)}, and waits for the decision. The coordinator counts itself and waits for
+    \[
+        |Q|=\left\lfloor\frac{N}{2}\right\rfloor+1.
+    \]
+    \item On the first quorum, the coordinator broadcasts \msg{WRITEOK} carrying the same non-null pair. A replica applies $P[idx]\leftarrow val$ only after this message, advances its latest pair, stores the update in history, and invokes the required callback.
+    \item The trigger replica completes its parent write transaction and returns success to the client. Duplicate or stale acknowledgements cannot create a second decision because the coordinator FSM leaves \code{WAITING\_ACK} after its first quorum.
+\end{enumerate}
+
+\subsection{Why all replicas obtain one total order}
+
+Pairs are ordered lexicographically:
+\[
+\langle e,i\rangle < \langle e',i'\rangle
+\iff e<e' \;\lor\; (e=e'\land i<i').
+\]
+Within an epoch, the coordinator actor reserves pairs and sends UPDATEs in mailbox order. Consider updates $A$ and $B$ with $A$ reserved first. Every participant receives UPDATE $A$ before UPDATE $B$ on its coordinator-to-replica FIFO channel, and sends ACK $A$ before ACK $B$ on its return channel. If $B$ has acknowledgements from a quorum, those same actors have already sent their acknowledgements for $A$; thus $A$ reaches a quorum no later than $B$. The coordinator sends WRITEOK $A$ no later than WRITEOK $B$, and each coordinator-to-replica FIFO channel preserves this order. A replica can temporarily store prefix $[A]$ while another stores $[A,B]$, but it cannot apply $[B,A]$ or $[B]$. This establishes total-order delivery for every completed epoch.
+
+Sequential consistency then follows from two composition rules. First, the client queue preserves program order. Second, a successful write result is emitted only after the contacted replica applies WRITEOK. Therefore, if the same client next reads that replica, the read is sent after application and observes the write or a later value in the same total order. Reads performed concurrently by different clients may see different-length prefixes, which sequential consistency permits; they never force replicas to disagree on the order of writes.
+
+The protocol also satisfies integrity in the normal case: an update is created from a received request, keyed by one transaction ID and one epoch pair, and applied at most once when that FSM accepts the matching WRITEOK. Validity and eventual delivery depend on the stated reliable-channel, bounded-delay, and surviving-quorum assumptions.
+
+\clearpage
+\subsection{Timeouts, heartbeat, and crash detection}
+
+Timeouts are self-messages scheduled through the Akka scheduler. Each FSM stores its current \code{Cancellable}; a valid response cancels it. Cancellation alone is insufficient because an expired event may already be in the mailbox, so protocols additionally reject stale events by state or generation.
+
+\noindent\begin{tabularx}{\textwidth}{@{}p{32mm} X X@{}}
+\toprule
+Detector & Bound used & Reaction \\
+\midrule
+Client READ/WRITE & Configured public-API deadline & Report timeout and release the next queued client operation. \\
+UPDATE phase & $4L$, where $L=maxLatency+\frac{N}{2}maxLatency$ & A trigger missing UPDATE, or a participant missing WRITEOK, starts election for the known coordinator. \\
+Heartbeat watchdog & $3\cdot beatInterval+L$ & The follower accepts only the current watchdog generation and requests election once. \\
+Election ACK & $2L$ & Mark the unresponsive successor unavailable and retry at the next ring member. \\
+\bottomrule
+\end{tabularx}
+
+Every coordinator periodically schedules a local \msg{HeartbeatTickMsg}, then broadcasts a network \msg{HeartbeatMsg}. Followers run a watchdog. A \code{watchdogVersion} increments at every reset: if generation $k$ was cancelled after its event entered the mailbox, \msg{WatchdogExpired($k$)} cannot invalidate generation $k+1$. The heartbeat transaction then enters \code{ELECTION\_REQUESTED}, preventing repeated election requests from the same detector.
+
+Three independent observations can expose a failed coordinator: no UPDATE after a forwarded request, no WRITEOK after UPDATE, or no heartbeat. Their expirations need not be simultaneous. To stop these detectors from creating competing coordinators, election initiation is divided into deterministic slots based on ring distance from the failed coordinator. Its immediate correct successor starts first. A later candidate waits for detector skew plus a complete token/ACK ring traversal for every preceding position. In addition, a replica retains at most one preferred election transaction for a failed coordinator and rejects a competing token with a lower priority.
+
+Crash emulation is part of the protocol boundary rather than test-only shared state. A replica has \code{NONE}, \code{PENDING}, and \code{CRASHED} modes. A pending instruction counts a selected category---heartbeat, update, WRITEOK, or election---after each matching send or handled message. Broadcast checks the crash callback after every destination and stops immediately on entering \code{CRASHED}; therefore a test can reproduce partial dissemination rather than only a crash after the whole broadcast. A crashed replica ignores incoming messages and its send helpers return without transmission.
+
+\subsection{Ring election and termination}
+
+Replica IDs sorted increasingly define the logical ring. An \msg{ELECTION} token carries an immutable list of candidates. Each candidate contains its replica ID and latest applied \code{EpochPair}; comparison first selects the greatest pair and then the greatest replica ID to break a tie. This chooses the surviving replica with the longest applied prefix, rather than merely the largest node identifier.
+
+On first receiving the token, a participant appends its snapshot, forwards to the next available ring member, acknowledges the previous sender, and waits for its own successor's ACK. When an ACK times out, \code{RingNavigation} skips that target. Each attempt has an \code{attemptVersion}, so an old ACK timeout cannot skip the target of a newer attempt. If the best candidate becomes unavailable, it is removed and the next-best candidate is tried. Because each timeout permanently adds one failed member to a finite unavailable set, and a strict majority remains correct, forwarding either reaches a correct member or reduces the candidate set; it cannot wait forever on one edge.
+
+\clearpage
+\subsection{Synchronization and interrupted updates}
+
+When the token returns to a replica already listed, the participant computes
+\[
+ winner=\argmax_{r}\bigl(latestPair(r),\; replicaId(r)\bigr).
+\]
+The winner advances to epoch $1+\max_r epoch(r)$ with baseline pair $\langle e_{new},0\rangle$, records itself as coordinator, and sends every follower a \msg{SYNCHRONIZATION} containing the new identity and a defensive copy of its materialized array. A follower accepts this message only if the announced sender belongs to the static group, matches the announced coordinator, replaces the coordinator it currently considers failed, carries a strictly newer epoch, and has the correct array length.
+
+The full snapshot is intentionally used instead of replaying individual history entries. For a fixed-size array it transfers the same materialized prefix in one immutable message and also repairs a replica that missed several decisions. The winner sends synchronization before recovering waiting writes. Both messages use the same winner-to-follower FIFO channel, so every follower installs the snapshot before seeing a new-epoch UPDATE. The heartbeat FSM is then recreated with the coordinator-scoped ID $\langle coordinator,0\rangle$.
+
+An update timeout records its pre-election phase. If the trigger was still \code{WAITING\_UPDATE}, the failed coordinator never broadcast that request to it, so after synchronization it can safely submit the write to the new coordinator. If it was \code{WAITING\_WRITEOK}, the outcome is uncertain and automatic retry could duplicate an operation already present in the synchronized prefix; that old transaction is therefore cancelled. This is the at-most-once side of recovery.
+
+\subsection{Safety argument and explicit assumptions}
+
+Under the assumptions below, the state of every correct replica is a prefix of a single sequence $S$ of coordinator decisions. Normal operation preserves the prefix invariant by quorum causality and FIFO WRITEOK delivery. Election selects the greatest available prefix, copies it to every correct replica, and starts a greater epoch before accepting further writes. Hence an epoch change cannot reverse two committed updates, and client program order can be embedded in $S$.
+
+The implementation relies on the specification's static unique IDs, reliable FIFO channels, bounded accurate timeouts, fail-stop crashes without recovery, and a strict majority of correct replicas. Client deadlines must cover detection, election, and synchronization; an arbitrarily short external deadline could let a client advance while an earlier outcome is unknown.
+
+There is one additional recovery assumption that must be made explicit. Snapshot election uses the latest \emph{applied} pair, not the set of pending UPDATEs acknowledged before a coordinator crash. Therefore, for an interrupted WRITEOK, at least one correct replica that applied the decision must remain available until synchronization. If the only replicas that applied it all crash before election finishes, the remaining quorum remembers the pending UPDATE but the current election token does not carry it. Removing this stronger assumption would require candidates to include pending quorum evidence (or durable decision records) and the new coordinator to complete that decision before starting its epoch. This limitation does not affect the tested single-coordinator-crash execution, but it is relevant to the specification's strongest uniform-agreement formulation.
