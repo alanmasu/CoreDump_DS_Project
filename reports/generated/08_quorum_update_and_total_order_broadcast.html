@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quorum Update and Total-Order Broadcast</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}
+</style>
+</head>
+<body>
+<h1>Quorum Update and Total-Order Broadcast</h1>
+<blockquote>
+<p><strong>Learning goal.</strong> Understand the central distributed algorithm—why it has UPDATE, ACK, and WRITEOK phases; how a quorum helps; and which parts of the inspected branch remain incomplete.</p>
+</blockquote>
+<p><strong>Partial implementation inspected:</strong> <code>origin/feat/UpdateTransaction</code> at <code>59bbe80</code>.<br />
+<strong>Integration status:</strong> not present on <code>feature/electionTransaction</code> at <code>d1222a2</code>.</p>
+<h2>1. The purpose of the update protocol</h2>
+<p>Writes must be applied in the same order by every correct replica. The coordinator acts as the sequencing point. It does not immediately tell replicas to mutate their arrays; it first ensures a strict majority knows about the proposed update.</p>
+<p>The two phases are:</p>
+<pre><code class="language-text">Phase 1: UPDATE -&gt; ACK until quorum
+Phase 2: WRITEOK -&gt; apply/commit
+</code></pre>
+<p>The ACK phase creates recovery evidence. Because any two strict majorities intersect, a future surviving majority contains at least one member of an earlier majority. Under the project’s assumptions, election can find knowledge of the newest relevant update.</p>
+<h2>2. Three local roles</h2>
+<p>One logical update creates local <code>UpdateTransaction</code> FSMs with different roles.</p>
+<h3>Trigger replica</h3>
+<p>The contacted replica owns the parent <code>WriteTransaction</code>. Its child update forwards the request to the coordinator, waits for the coordinator’s broadcast, then behaves as a participant. It stores <code>writeTid</code> so it can finish the parent later.</p>
+<h3>Coordinator</h3>
+<p>The coordinator broadcasts <code>UpdateMsg</code>, counts itself as one ACK, collects participant ACKs, broadcasts <code>WriteOkMsg</code> after quorum, and commits locally.</p>
+<h3>Other participant</h3>
+<p>A follower creates a local FSM when it first receives <code>UpdateMsg</code>, replies with ACK, waits for WRITEOK, and commits when it arrives.</p>
+<h2>3. Message vocabulary</h2>
+<ul>
+<li><code>UpdateMsg(id, epochPair, sender, index, value)</code> proposes the update.</li>
+<li><code>UpdateAckMsg(id, epochPair, sender)</code> acknowledges knowledge of it.</li>
+<li><code>WriteOkMsg(id, epochPair, sender, index, value)</code> authorizes application.</li>
+<li><code>UpdateTimeoutMsg</code> detects silence before expected UPDATE progress.</li>
+<li><code>WriteOkTimeoutMsg</code> detects a coordinator that sent UPDATE but did not finish.</li>
+</ul>
+<p>All replicas participating in one update use the same update transaction ID so messages route to their local representations of that conversation.</p>
+<h2>4. Healthy five-replica trace</h2>
+<p>Assume R0 is coordinator, R2 is contacted, and quorum size is 3.</p>
+<ol>
+<li>R2 creates child update <code>&lt;R2,0&gt;</code> and sends <code>UpdateMsg</code> to R0.</li>
+<li>R2 enters <code>WAITING_UPDATE</code> and schedules <code>UpdateTimeoutMsg</code>.</li>
+<li>R0 receives the message, creates coordinator FSM <code>&lt;R2,0&gt;</code>, and broadcasts UPDATE to R1–R4.</li>
+<li>R0 sets ACK count to one for itself.</li>
+<li>R2 receives the coordinator broadcast, cancels its first timeout, sends ACK, and waits for WRITEOK.</li>
+<li>R1, R3, and R4 each create participant FSMs, ACK, and wait for WRITEOK.</li>
+<li>After any two distinct follower ACKs, R0 has count three and reaches quorum.</li>
+<li>R0 broadcasts WRITEOK and commits locally.</li>
+<li>Each follower commits on WRITEOK.</li>
+<li>R2 sends local <code>WriteFinishMsg</code> to its parent write transaction.</li>
+<li>The parent returns success to the client.</li>
+</ol>
+<p>Late ACKs after quorum are no longer needed for the decision. Late replicas should still receive reliable WRITEOK and eventually apply.</p>
+<h2>5. Quorum mathematics</h2>
+<p>The implementation computes:</p>
+<pre><code class="language-text">replicaCount / 2 + 1
+</code></pre>
+<p>with integer division, which equals <code>floor(N/2)+1</code>.</p>
+<p>For <code>N=3</code>, quorum is 2. For <code>N=5</code>, quorum is 3. A strict majority matters because two majorities intersect. Two sets of size 2 in a four-node system can be disjoint, but strict majorities of size 3 cannot.</p>
+<p>Quorum intersection supplies at least one shared witness. It does not automatically implement recovery; the witness must retain and communicate sufficient immutable update history.</p>
+<h2>6. Total order requires more than FIFO</h2>
+<p>FIFO from the coordinator ensures each follower receives coordinator messages in send order. Total order additionally requires the coordinator to serialize concurrent update decisions and assign stable <code>EpochPair</code>s.</p>
+<p>A sound normal-term design is:</p>
+<ol>
+<li>coordinator accepts one update ordering decision at a time, or otherwise maintains an explicit ordered pipeline;</li>
+<li>it assigns a unique next pair before broadcasting UPDATE;</li>
+<li>the same pair travels in UPDATE, ACK, and WRITEOK;</li>
+<li>replicas buffer or reject out-of-order operations according to a defined rule; and</li>
+<li>duplicates are recognized by the pair.</li>
+</ol>
+<p>The inspected branch does not yet establish all these points.</p>
+<h2>7. What the branch currently implements</h2>
+<p>The branch contains role selection, broadcast, ACK counting, quorum calculation, WRITEOK broadcast, timeouts, parent completion plumbing, epoch advancement, history insertion, and update callbacks.</p>
+<p>This is meaningful scaffolding, but the following observed limitations prevent treating it as a complete total-order implementation:</p>
+<ul>
+<li>The proposed update is broadcast with <code>startEpochPair</code>, which can be null; a stable next update pair is not assigned before phase one.</li>
+<li>ACK count increments per message without a set of distinct ACK senders, so duplicate ACKs are not explicitly prevented from counting twice.</li>
+<li><code>termination</code> advances the epoch pair and invokes <code>callbackOnUpdateApplied</code>, but the inspected method does not call <code>setPosition(index, value)</code>; the array itself is not visibly mutated there.</li>
+<li>Timeout branches that should trigger election/recovery are commented out.</li>
+<li>History stores the mutable <code>UpdateTransaction</code> rather than a small immutable update record.</li>
+<li>Concurrent coordinator updates are not shown as serialized.</li>
+<li>No validation rejects stale epoch, wrong coordinator, mismatched value, or malformed sender.</li>
+</ul>
+<p>These are implementation-status facts, not changes made by this documentation task.</p>
+<h2>8. Coordinator failure windows</h2>
+<h3>Before broadcasting UPDATE</h3>
+<p>Only the trigger replica knows the client request. Its <code>UpdateTimeoutMsg</code> should detect silence, trigger election, and retry after a new coordinator is synchronized.</p>
+<h3>After some UPDATE deliveries, before quorum</h3>
+<p>Some replicas have observed the update. Recovery must decide whether it could have been or must become committed. The specification emphasizes not losing any update that may have been applied.</p>
+<h3>After quorum, before all WRITEOK deliveries</h3>
+<p>The update has majority evidence. Some replica may already apply it. The new coordinator must complete it across correct replicas to preserve uniform agreement.</p>
+<h3>After all WRITEOK deliveries, before client result</h3>
+<p>The database update can be successful even though the client times out because the contacted replica or return path failed.</p>
+<h2>9. Duplicate and late-message policy</h2>
+<p>A finished design needs explicit behavior for:</p>
+<ul>
+<li>repeated UPDATE with the same pair;</li>
+<li>repeated ACK from the same replica;</li>
+<li>repeated WRITEOK;</li>
+<li>WRITEOK received without known UPDATE;</li>
+<li>old-epoch messages after election;</li>
+<li>ACKs arriving after the transaction completed; and</li>
+<li>two payloads claiming the same <code>EpochPair</code>.</li>
+</ul>
+<p>Integrity requires at-most-once application. Silent ignoring is appropriate for some stale messages; conflicting payloads may indicate an invariant violation and deserve logging or rejection.</p>
+<h2>10. Tests and evidence</h2>
+<p><code>TestUpdateTransaction</code> checks successful <code>WriteResult</code> for three/five replicas and coordinator IDs zero/one. It also checks client timeout when the contacted replica or coordinator is crashed.</p>
+<p>Those tests do not inspect every replica’s <code>positions[]</code>, update history, epoch equality, distinct ACK set, duplicate application, concurrent updates, or recovery. A success callback alone cannot prove total-order broadcast.</p>
+<p>The base <code>NoCrashes</code> and <code>WithCrashes</code> tests express stronger end-to-end expectations, but the split feature state means their passing status must be re-established on the final integrated commit.</p>
+<h2>11. Code map</h2>
+<ul>
+<li><code>WriteTransaction.start</code> on replica: creates the child update.</li>
+<li><code>UpdateTransaction.start</code>: selects trigger/coordinator/participant role.</li>
+<li><code>Replica.onUpdateMsg</code>: creates a local FSM or routes to an existing one.</li>
+<li><code>startAsCoordinator</code>: phase-one broadcast and self-count.</li>
+<li><code>coordinatorStateMachine</code>: ACK quorum and WRITEOK.</li>
+<li><code>replicaStateMachine</code>: UPDATE ACK and WRITEOK wait.</li>
+<li><code>termination</code>: current commit/callback/history path.</li>
+<li><code>TestUpdateTransaction</code>: focused branch scenarios.</li>
+<li><code>transaction_Write.mmd</code>: intended healthy exchange.</li>
+</ul>
+<h2>12. Exam rehearsal</h2>
+<p><strong>Why ACK before applying?</strong> The coordinator first establishes majority knowledge, creating fault-tolerant recovery evidence. WRITEOK is the ordered commit instruction.</p>
+<p><strong>Why does the coordinator count itself?</strong> It is also a replica and knows the update it is broadcasting, so its local participation belongs to the quorum.</p>
+<p><strong>Does quorum alone guarantee total order?</strong> No. It must be combined with one stable coordinator term, unique ordered update IDs, serialized decisions, FIFO dissemination, and recovery across term changes.</p>
+<p>The invariant to remember is: <strong>a replica applies an update only once, after valid WRITEOK for a unique ordered pair, and quorum evidence must survive coordinator replacement.</strong></p>
+<h2>13. The two-phase update on one page</h2>
+<pre class="diagram">Coordinator                    Followers
+     | -- UPDATE(index,value,epoch) ---------> |
+     | <------------- ACK -------------------- |
+     |                                         |
+  quorum reached                              |
+     | -- WRITEOK(epoch) --------------------> |
+     | <------ apply once + callback --------- |
+     v
+  record committed history</pre>
+<p><code>UPDATE</code> is a prepare/knowledge message: the follower can record that it has
+seen the proposed value. <code>ACK</code> says “I accepted this proposal,” not “the
+application has become visible everywhere.” <code>WRITEOK</code> is the commit instruction
+that lets each replica materialize the value. This distinction explains why a
+quorum count alone cannot be used as a read result.</p>
+<h2>14. Code microscope: coordinator and participant roles</h2>
+<p>When studying <code>UpdateTransaction</code>, first classify the role selected by the
+incoming message. The coordinator creates the ordered pair, tracks responders,
+and decides when the strict majority is met. A participant validates sender,
+index, epoch, and duplicate status before ACKing. Both roles must converge on
+the same “already committed?” check before applying WRITEOK.</p>
+<pre class="code-microscope">// Conceptual quorum decision
+acks.add(sender)
+if (acks.size() &gt; replicas.size() / 2) {
+    committed = true
+    broadcast(WriteOK(epoch))
+}
+
+// Participant-side idempotence
+if (history.contains(epoch)) return; // duplicate WRITEOK
+if (!committedEpochIsValid(epoch)) return;
+applyOnce(index, value)
+history.add(epoch)</pre>
+<p>The concrete branch has important review points: the starting epoch pair may
+be nullable or reused, ACKs need a distinct sender set rather than a raw count,
+and the observed termination path must actually call <code>setPosition(index, value)</code>. A callback or history append without that materialized-state mutation
+would report success while reads still return the old value.</p>
+<h2>15. Quorum arithmetic and failure windows</h2>
+<p>For <code>N=5</code>, a strict majority is 3. If the coordinator counts itself, it needs
+two remote ACKs; if it does not, it needs three remote ACKs. Write this down
+before reading a test, because the two interpretations produce different crash
+tolerance. A quorum that survives a coordinator crash is useful only if the
+new coordinator can identify the committed or partially prepared epoch.</p>
+<p>The dangerous window is “quorum reached, WRITEOK not everywhere.” Election and
+recovery must preserve that update or deliberately prove it was not committed.
+Starting a new sequence number before resolving the window can create two
+orders for the same logical history.</p>
+<h3>Practice</h3>
+<p>For three, five, and six replicas, calculate the strict-majority threshold and
+the maximum number of failures tolerated before progress stops. Then write a
+test that delivers duplicate ACKs from one sender and proves they count once.</p>
+</body>
+</html>

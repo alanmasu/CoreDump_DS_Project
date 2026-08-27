@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Communication, FIFO Channels, and Time</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}
+</style>
+</head>
+<body>
+<h1>Communication, FIFO Channels, and Time</h1>
+<blockquote>
+<p><strong>Learning goal.</strong> Learn which messages represent network traffic, which messages are local timer events, what FIFO really guarantees, and how those facts determine timeout design.</p>
+</blockquote>
+<p><strong>Snapshot:</strong> <code>feature/electionTransaction</code> at <code>d1222a2</code>.<br />
+<strong>Key files:</strong> <code>AbstractReplica.java</code>, <code>NetworkChannel.java</code>, <code>Replica.java</code>, <code>DistributedActor.java</code>.</p>
+<h2>1. Two ways a message can move</h2>
+<p>The code has two importantly different delivery paths.</p>
+<p><strong>Protocol network path:</strong> a replica calls <code>broadcast</code> or <code>unicast</code>, which calls inherited <code>AbstractReplica.tell</code>. That method sends through a <code>NetworkChannel</code> actor, introducing configured latency while preserving FIFO order.</p>
+<p><strong>Local path:</strong> an actor sends to itself or uses <code>scheduleToItself</code>. The message enters the same actor’s mailbox without passing through the simulated network.</p>
+<p>These paths must not be confused. A heartbeat sent from the coordinator to followers is network traffic. A <code>HeartbeatTickMsg</code> telling the coordinator that it is time to send a heartbeat is a local scheduler event.</p>
+<h2>2. What <code>NetworkChannel</code> owns</h2>
+<p>Each replica lazily creates one <code>NetworkChannel</code> for each destination. Because the channel is a child of the sending replica, the effective identity is:</p>
+<pre><code class="language-text">(source replica, destination replica)
+</code></pre>
+<p>The channel owns:</p>
+<ul>
+<li>the destination <code>ActorRef</code>;</li>
+<li>minimum and maximum delay;</li>
+<li>a FIFO queue of <code>(message, originalSender)</code> pairs; and</li>
+<li>a flag showing whether a delivery is already scheduled.</li>
+</ul>
+<p>When a message arrives, <code>onEnqueue</code> places it at the tail. If no delivery is active, the channel schedules a private <code>Deliver</code> message to itself. <code>onDeliver</code> removes the head, sends it to the real destination using the saved sender, and schedules the next delivery if the queue is non-empty.</p>
+<p>Only one queued message is scheduled at a time. That is what prevents a later random delay from overtaking an earlier message on the same channel.</p>
+<h2>3. The exact scope of FIFO</h2>
+<p>FIFO means:</p>
+<blockquote>
+<p>If replica A sends message <code>m1</code> and then <code>m2</code> to replica B through the same channel, B receives <code>m1</code> before <code>m2</code>.</p>
+</blockquote>
+<p>It does <strong>not</strong> mean:</p>
+<ul>
+<li>all messages in the entire system have one order;</li>
+<li>a message from A reaches B before a message from C reaches B;</li>
+<li>messages sent to different destinations arrive together; or</li>
+<li>a local timer message cannot be processed between two network messages.</li>
+</ul>
+<p>Example:</p>
+<pre><code class="language-text">A -&gt; B: UPDATE U1
+A -&gt; B: WRITEOK U1       guaranteed in this order
+C -&gt; B: ELECTION E       may arrive before, between, or after them
+B -&gt; B: timeout T        may also be interleaved by the mailbox
+</code></pre>
+<p>This is why IDs, states, and stale-timeout checks are still necessary even with FIFO channels.</p>
+<h2>4. Preserving the logical sender</h2>
+<p>Without special handling, B would see the channel actor as <code>getSender()</code>. <code>NetworkChannel</code> therefore saves the original sender and calls:</p>
+<pre><code class="language-text">destination.tell(message, originalSender)
+</code></pre>
+<p>Protocol message classes also contain an explicit <code>sender</code> field. The system therefore has two sender concepts:</p>
+<ul>
+<li>Akka envelope sender: supplied to <code>tell</code>;</li>
+<li>message metadata sender: stored inside <code>Msg</code>.</li>
+</ul>
+<p>The implementation often uses explicit metadata because scheduled messages and forwarded transactions need stable, serializable correlation. A detailed code review should still check that the two identities cannot contradict each other in a security- or correctness-relevant way.</p>
+<h2>5. Broadcast and self-delivery</h2>
+<p><code>Replica.broadcast(msg)</code> excludes the sender by default. This has an important consequence: a coordinator cannot rely on broadcasting <code>UPDATE</code> to count itself. The update FSM must represent the coordinator’s local participation directly, normally by starting with ACK count one and applying locally when the quorum is reached.</p>
+<p><code>Replica.unicast</code> also returns without sending when the target is <code>getSelf()</code>. This prevents pointless network emulation but means any algorithm that logically sends to itself needs an explicit local path.</p>
+<p>Both helpers stop sending once crash state is <code>CRASHED</code>.</p>
+<h2>6. Random delay range</h2>
+<p><code>NetworkChannel.scheduleNextDelivery</code> computes:</p>
+<pre><code class="language-text">minLatency + random.nextInt(maxLatency - minLatency)
+</code></pre>
+<p>The generated values range from <code>minLatency</code> through <code>maxLatency - 1</code>. It requires <code>maxLatency &gt; minLatency</code>; equal bounds would make <code>nextInt(0)</code> invalid. This is an implementation constraint worth recording even though normal test constants satisfy it.</p>
+<h2>7. Timers are messages, not interrupts</h2>
+<p><code>DistributedActor.scheduleToItself(delay, msg)</code> asks Akka’s scheduler to enqueue <code>msg</code> later. The scheduler does not call transaction code directly and does not interrupt the actor.</p>
+<p>This preserves actor encapsulation:</p>
+<pre><code class="language-text">timer expires
+  -&gt; timeout message enters owner's mailbox
+  -&gt; owner dispatches it by TransactionId
+  -&gt; transaction checks its current state/version
+</code></pre>
+<p>The delay is only the earliest intended enqueue time. Mailbox backlog and runtime scheduling can make processing later.</p>
+<h2>8. Why cancelling a timer is insufficient</h2>
+<p>Calling <code>Cancellable.cancel()</code> helps if the timeout has not been enqueued. It cannot pull a timeout message back out after it entered the mailbox.</p>
+<p>Heartbeat demonstrates the safe pattern:</p>
+<ol>
+<li>follower schedules watchdog version 4;</li>
+<li>heartbeat arrives;</li>
+<li>follower cancels version 4 and schedules version 5;</li>
+<li>version 4 was already queued;</li>
+<li>transaction receives it but rejects it because <code>4 != currentVersion</code>.</li>
+</ol>
+<p>Cancellation saves work; version/state validation provides correctness.</p>
+<p>The same reasoning should be applied to election forwarding attempts and any update timeout that can be replaced.</p>
+<h2>9. Designing timeout budgets</h2>
+<p>A safe timeout must exceed the longest valid path it is monitoring, including network hops and scheduling tolerance.</p>
+<p>Examples:</p>
+<ul>
+<li>A read response needs a client-to-replica send and a replica-to-client reply, although current client traffic does not use <code>NetworkChannel</code> in the same way as replica traffic.</li>
+<li>An election ACK covers one delayed election send plus one delayed ACK return.</li>
+<li>A follower watchdog must allow several coordinator heartbeat intervals plus maximum propagation and scheduling tolerance.</li>
+</ul>
+<p><code>AbstractReplica.getMaxLatencyPlusTolerance</code> adds a replica-count-dependent allowance. <code>HeartbeatTransaction</code> uses three missed heartbeat intervals plus that tolerance. These are implementation assumptions that should be justified against configured bounds rather than memorized as magic constants.</p>
+<h2>10. Failure and crash interaction</h2>
+<p>Reliable channels do not make a crashed destination reply. A queued message can still be delivered to its actor, but a correctly simulated crashed <code>Replica</code> ignores it. The sender then learns only through timeout.</p>
+<p>Similarly, a replica may crash during a broadcast loop. <code>updateCrashStatusCallback</code> runs after sending activity, so a deterministic crash category can stop later protocol work. The exact point at which the crash counter changes is part of the fault model and belongs in the crash report.</p>
+<h2>11. Common misconceptions</h2>
+<ul>
+<li><strong>“FIFO removes stale messages.”</strong> No. It orders one channel; local timers and other senders can interleave.</li>
+<li><strong>“A scheduled message bypasses actor safety.”</strong> No. It returns through the mailbox.</li>
+<li><strong>“A cancelled timeout cannot arrive.”</strong> It may already be queued.</li>
+<li><strong>“Broadcast automatically includes the sender.”</strong> This implementation excludes self unless requested.</li>
+<li><strong>“Reliable means immediate.”</strong> It means eventual delivery under the model, still with delay.</li>
+</ul>
+<h2>12. What the tests currently establish</h2>
+<p><code>TestDispatcher</code> checks transaction-ID routing behavior. <code>TestHeartbeatTransaction</code> checks periodic heartbeat broadcast and routing of heartbeat ticks. Election tests inspect timeout metadata and ring navigation. These are useful component checks, but they do not prove every cross-channel ordering or every timeout budget.</p>
+<h2>13. Exam rehearsal</h2>
+<p>If asked why <code>NetworkChannel</code> exists when Akka already sends messages, answer: it makes the course’s network model visible—controlled random latency and FIFO order per source/destination pair—so tests can exercise distributed timing rather than zero-delay local actor delivery.</p>
+<p>The invariant to remember is: <strong>all replica-to-replica protocol traffic must use the simulated channel, while scheduler events remain local and must be validated when processed.</strong></p>
+<h2>14. A message’s journey through the simulated network</h2>
+<pre class="diagram">Replica A                  NetworkChannel                 Replica B
+   |  tell(msg)                     |                            |
+   |------------------------------->| enqueue(A,B,msg)            |
+   |                                | choose delay d              |
+   |                                | scheduler(d)                |
+   |                                |----------------------------->| deliver
+   |                                |              sender appears as A
+
+same A -> B queue:  m1, m2, m3
+guarantee: delivery(m1) happens before delivery(m2) before delivery(m3)</pre>
+<p>FIFO is scoped to one ordered pair. If A sends <code>m1</code> and C sends <code>m2</code> to B,
+the channel may deliver either one first. This is why a protocol must put
+ordering information in its messages instead of assuming that “the first
+message I observe is the oldest update globally.”</p>
+<h2>15. Code microscope: delayed delivery versus local scheduling</h2>
+<p>The channel normally does three conceptually separate operations: append to
+the source/destination queue, calculate a delay, and schedule a delivery
+callback. A scheduler timeout in a transaction does not pass through this
+queue. It is a local event, so its timestamp says nothing about when a remote
+message was sent.</p>
+<pre class="code-microscope">Conceptual channel logic:
+q = queues.get(key(sender, target))
+q.add(Envelope(sender, target, message))  // FIFO insertion
+d = randomDelay()
+scheduleOnce(d, deliverNext(key))
+
+At delivery, preserve the original sender:
+target.tell(envelope.message(), envelope.sender())</pre>
+<p>The final line matters: a follower should not accept a heartbeat or ACK merely
+because it arrived through a trusted channel; it should also verify the sender
+encoded by the envelope. When inspecting the real implementation, identify
+where <code>ActorRef.noSender()</code> is used and where the original sender is preserved.
+A lost sender can make every participant look like the coordinator.</p>
+<h2>16. Timing arithmetic students can reuse</h2>
+<p>Let <code>L</code> be the maximum one-hop network delay and <code>H</code> the heartbeat period. A
+follower that resets its watchdog after each heartbeat should use a timeout
+strictly larger than <code>H + L</code> (usually with a safety margin). A two-hop quorum
+round needs roughly <code>2L</code> network budget, plus scheduler and processing slack.
+These are not proofs of liveness, but they expose obviously impossible
+constants. If a timeout is smaller than one configured hop, healthy nodes will
+spuriously start elections.</p>
+<h2>17. Experiment and review questions</h2>
+<ol>
+<li>Send two messages from A to B and one from C to B. Which orderings are
+legal, and which would violate the channel contract?</li>
+<li>Cancel a watchdog after its event has entered the mailbox. What additional
+field (for example, a generation/version) lets the handler reject it?</li>
+<li>In a test, how would you distinguish “the message was delayed” from “the
+receiver crashed” without sleeping for an arbitrary number of seconds?</li>
+</ol>
+</body>
+</html>

@@ -1,0 +1,163 @@
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}

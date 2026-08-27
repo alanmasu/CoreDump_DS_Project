@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Heartbeat and Silent-Failure Detection</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}
+</style>
+</head>
+<body>
+<h1>Heartbeat and Silent-Failure Detection</h1>
+<blockquote>
+<p><strong>Learning goal.</strong> Understand how a quiet system detects a dead coordinator, why every replica owns a local heartbeat FSM, and how stale watchdog messages are prevented from starting false elections.</p>
+</blockquote>
+<p><strong>Implementation base:</strong> <code>origin/main</code> at <code>84846dc</code>.<br />
+<strong>Election handoff inspected:</strong> <code>feature/electionTransaction</code> at <code>d1222a2</code>.<br />
+<strong>Key files:</strong> <code>HeartbeatTransaction.java</code>, <code>Replica.java</code>, heartbeat diagrams and tests.</p>
+<h2>1. The failure that application timeouts cannot see</h2>
+<p>If clients are actively writing, missing UPDATE or WRITEOK can reveal coordinator failure. But what if nobody sends a write for ten minutes? A dead coordinator would remain unnoticed.</p>
+<p>Heartbeat solves this silent-period problem. The coordinator periodically broadcasts “I am alive.” Followers restart a watchdog whenever they receive a valid heartbeat. If a follower’s current watchdog expires, it asks the replica to start an election.</p>
+<p>Heartbeat does not replace UPDATE or WRITEOK timeouts. It detects absence of general coordinator liveness, while those timers detect failure at specific update stages.</p>
+<h2>2. One local FSM per replica</h2>
+<p>After <code>InitSystem</code>, every replica constructs a local <code>HeartbeatTransaction</code>. These are separate Java objects with separate state and timers:</p>
+<ul>
+<li>coordinator’s local FSM sends heartbeats;</li>
+<li>each follower’s local FSM watches them.</li>
+</ul>
+<p>They all use the same coordinator-scoped <code>TransactionId</code>:</p>
+<pre><code class="language-text">&lt;coordinator ActorRef, 0&gt;
+</code></pre>
+<p>The shared ID is a correlation key, not a shared object. A heartbeat sent by the coordinator routes to the follower’s own local heartbeat FSM because both represent the same coordinator term.</p>
+<h2>3. Message vocabulary</h2>
+<h3><code>HeartbeatTickMsg</code></h3>
+<p>A local scheduler message. It tells the coordinator FSM to emit the next heartbeat. It never crosses <code>NetworkChannel</code>.</p>
+<h3><code>HeartbeatMsg</code></h3>
+<p>A network message broadcast from coordinator to followers. It includes the expected numeric <code>coordinatorId</code>.</p>
+<h3><code>WatchdogExpiredMsg</code></h3>
+<p>A local scheduler message on a follower. It includes <code>watchdogVersion</code> so an old timeout can be identified.</p>
+<p>This split makes the system easy to reason about: only <code>HeartbeatMsg</code> is remote evidence; tick and expiry are local clocks.</p>
+<h2>4. FSM states</h2>
+<pre><code class="language-text">STOPPED -&gt; COORDINATOR
+STOPPED -&gt; WATCHING -&gt; ELECTION_REQUESTED
+</code></pre>
+<ul>
+<li><code>STOPPED</code>: constructed, not started.</li>
+<li><code>COORDINATOR</code>: schedules ticks and broadcasts.</li>
+<li><code>WATCHING</code>: follower maintains watchdog.</li>
+<li><code>ELECTION_REQUESTED</code>: a current watchdog expired; do not request repeatedly.</li>
+</ul>
+<p>Repeated <code>start()</code> calls outside <code>STOPPED</code> are ignored, preventing duplicate periodic timer chains.</p>
+<h2>5. Coordinator trace</h2>
+<ol>
+<li><code>HeartbeatTransaction.start</code> compares owner replica ID with <code>coordinatorID</code>.</li>
+<li>If equal, state becomes <code>COORDINATOR</code>.</li>
+<li>It schedules one <code>HeartbeatTickMsg</code> after the configured beat interval.</li>
+<li>When the tick arrives, replica routing returns it to this FSM.</li>
+<li>The FSM verifies it is still in <code>COORDINATOR</code>.</li>
+<li>It broadcasts <code>HeartbeatMsg</code> to every other replica through delayed FIFO channels.</li>
+<li>It schedules the next one-shot tick.</li>
+</ol>
+<p>Using repeated one-shot scheduling avoids maintaining a second periodic callback mechanism. Each iteration returns through the actor mailbox.</p>
+<h2>6. Follower trace</h2>
+<ol>
+<li>Start sees that owner is not coordinator.</li>
+<li>State becomes <code>WATCHING</code>.</li>
+<li><code>restartWatchdog</code> increments the version and schedules expiry.</li>
+<li>A valid heartbeat with the currently expected coordinator ID arrives.</li>
+<li>The follower cancels the old timer if possible.</li>
+<li>It increments version and schedules a new watchdog.</li>
+</ol>
+<p>Heartbeats received in any other state or naming another coordinator do not reset the watchdog.</p>
+<h2>7. Watchdog budget</h2>
+<p>The current formula is:</p>
+<pre><code class="language-text">3 * coordinatorBeatInterval + maxLatencyPlusTolerance
+</code></pre>
+<p>The intention is to tolerate several missed opportunities plus one delayed delivery/scheduling allowance. With a 1000 ms beat interval, the follower does not elect after a single heartbeat is late.</p>
+<p>The formula is an implementation assumption. To defend it in an exam, relate each term to an actual path and configured network bound. Do not say merely “three seemed safe.”</p>
+<h2>8. The stale-timeout race</h2>
+<p>This is the most important educational detail.</p>
+<pre><code class="language-text">watchdog version 4 scheduled
+heartbeat arrives
+version 4 timer cancelled
+version 5 scheduled
+version 4 expiry was already placed in mailbox
+</code></pre>
+<p>If the FSM reacted only to the message class, version 4 could start an election even though a heartbeat just arrived. It therefore compares <code>expired.watchdogVersion</code> with the current field. Mismatch means stale; ignore it.</p>
+<p>This pattern is transferable to retries, leases, election attempts, and request generations.</p>
+<h2>9. Election handoff</h2>
+<p>When the current version expires in <code>WATCHING</code>:</p>
+<ol>
+<li>state becomes <code>ELECTION_REQUESTED</code> first;</li>
+<li>FSM calls <code>Replica.startElection(currentCoordinatorID)</code>.</li>
+</ol>
+<p>Changing state first prevents a second queued expiry from triggering another request. <code>Replica.startElection</code> adds further deduplication and a deterministic delayed start based on ring distance.</p>
+<p>On <code>origin/main</code>, this handoff was a TODO. The current election branch replaces it with the concrete call, so report provenance matters.</p>
+<h2>10. Restart after a new coordinator</h2>
+<p>Synchronization updates <code>coordinatorID</code> and epoch, removes the old heartbeat transaction from active routing, constructs a new local FSM with the new coordinator’s ActorRef and sequence zero, and starts the correct role.</p>
+<p>Old queued tick/expiry messages carry the old coordinator-scoped transaction ID. Because the old FSM is no longer active, they are dropped by dispatch. A new coordinator ActorRef also changes the ID.</p>
+<h2>11. Failure and validation boundaries</h2>
+<p>The FSM checks numeric coordinator ID but the inspected <code>handleHeartbeat</code> does not independently compare <code>heartbeat.sender</code> with the membership ActorRef for that coordinator. In the trusted course model, messages are not Byzantine, but sender validation still makes stale/malformed input behavior clearer.</p>
+<p>A follower already in <code>ELECTION_REQUESTED</code> ignores heartbeats. Recovery must install a new heartbeat transaction rather than trying to revive the old term.</p>
+<h2>12. Tests and missing cases</h2>
+<p>Current regression tests show:</p>
+<ul>
+<li>coordinator broadcasts periodic heartbeat messages; and</li>
+<li>a scheduled tick routes to the heartbeat transaction by ID.</li>
+</ul>
+<p>Important missing focused tests include:</p>
+<ul>
+<li>follower watchdog expiry starts exactly one election;</li>
+<li>a valid heartbeat postpones expiry;</li>
+<li>stale watchdog versions are ignored;</li>
+<li>wrong-coordinator and wrong-sender heartbeats do not reset;</li>
+<li>every replica initializes one local FSM with the shared ID; and</li>
+<li>heartbeat restarts correctly after synchronization.</li>
+</ul>
+<h2>13. Exam rehearsal</h2>
+<p><strong>Why not create one shared HeartbeatTransaction object?</strong> Actor state cannot be shared mutably. Each replica needs its own role and timer, while a shared ID correlates their messages.</p>
+<p><strong>Why is cancel plus version needed?</strong> Cancel may fail to remove an event already queued. Version validation decides whether the event is still current at handling time.</p>
+<p>The invariant to remember is: <strong>only a current follower watchdog for the currently expected coordinator may trigger one election request.</strong></p>
+<h2>14. Heartbeat as a local FSM plus a distributed signal</h2>
+<pre class="diagram">Follower local FSM                         Coordinator
+      |                                         |
+      |-- schedule heartbeat tick ------------> |
+      |                                         |
+      |<----------- HeartbeatMsg ---------------|
+      | reset watchdog(version=7)               |
+      |                                         X silent/crashed
+      | watchdog(version=7) expires             |
+      | validate expected coordinator + version |
+      | request ElectionTransaction             |
+</pre>
+<p>There is one <code>HeartbeatTransaction</code> object per replica, not one globally
+shared object. The coordinator instance sends heartbeats; follower instances
+maintain watchdogs. They share a coordinator-scoped <code>TransactionId</code> so routing
+can identify the term, while their timers and state remain actor-local.</p>
+<h2>15. Code microscope: why the version field exists</h2>
+<p>Consider this event order: watchdog v6 is scheduled; a heartbeat arrives and
+installs v7; cancellation of v6 races with the scheduler; v6 is delivered to
+the mailbox. A boolean “watchdog exists” is insufficient because v6 and v7 are
+both real queued events. The handler must compare the event’s version with the
+current field and ignore v6.</p>
+<pre class="code-microscope">onHeartbeat(msg):
+    if (msg.sender() != expectedCoordinator) return;
+    watchdogVersion++;
+    cancel(oldTimeout);
+    timeout = schedule(WatchdogExpired(watchdogVersion));
+
+onWatchdogExpired(expired):
+    if (expired.version() != watchdogVersion) return; // stale event
+    requestElectionOnce();
+</pre>
+<p>This is a general asynchronous-programming pattern: cancellation is an
+optimization; validation at consumption time is the correctness mechanism.</p>
+<h2>16. Timing and false suspicions</h2>
+<p>With heartbeat period <code>H</code> and channel delay bound <code>L</code>, a timeout near <code>H</code> can
+fire during a healthy delayed delivery. Add scheduler jitter and processing
+time when choosing the safety margin. Conversely, an enormous timeout delays
+election after a genuine crash. Explain the chosen bound in terms of the
+configuration, then test it with deterministic delay values rather than relying
+on one lucky random run.</p>
+<h3>Practice</h3>
+<p>Write a test where a wrong sender sends a heartbeat, then the real coordinator
+sends one. The wrong message must not reset the timer. Add a second test that
+delivers an old watchdog version after a fresh heartbeat and proves no duplicate
+election request is emitted.</p>
+</body>
+</html>

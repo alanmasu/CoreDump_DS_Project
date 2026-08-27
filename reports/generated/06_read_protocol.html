@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Read Protocol</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}
+</style>
+</head>
+<body>
+<h1>Read Protocol</h1>
+<blockquote>
+<p><strong>Learning goal.</strong> Trace the smallest complete application protocol in the project and use it to practice actor messages, transaction states, local state access, and timeout handling.</p>
+</blockquote>
+<p><strong>Implementation inspected:</strong> <code>origin/feat/readTransaction</code> at <code>1ed58b6</code>.<br />
+<strong>Integration status:</strong> implemented on a feature branch, absent from <code>feature/electionTransaction</code> at <code>d1222a2</code>.</p>
+<h2>1. Why read is the best first protocol</h2>
+<p>A read has one request hop and one reply hop. It does not involve the coordinator, a quorum, epochs, or recovery. That makes it a good place to learn the transaction framework before studying writes.</p>
+<p>The protocol asks one replica: “What value is currently in your local array at this index?”</p>
+<h2>2. Message vocabulary</h2>
+<p><code>ReadTransaction</code> defines three messages:</p>
+<ul>
+<li><code>ReadMsg(transactionId, epochPair, sender, index)</code> travels from client to replica.</li>
+<li><code>ReadResultMsg(transactionId, epochPair, sender, value, replicaId)</code> travels back.</li>
+<li><code>ReadTimeoutMsg(transactionId, epochPair, sender)</code> is scheduled locally to the client.</li>
+</ul>
+<p>The result contains the numeric replica ID because <code>ActorRef</code> alone is not the result format required by <code>AbstractClient.ReadResult</code>.</p>
+<h2>3. FSM states</h2>
+<p>The read FSM has:</p>
+<pre><code class="language-text">INIT -&gt; WAITING_RESULT -&gt; DONE
+                       -&gt; TIMEOUT
+</code></pre>
+<ul>
+<li><code>INIT</code>: object constructed but request not sent.</li>
+<li><code>WAITING_RESULT</code>: <code>ReadMsg</code> sent and timeout scheduled.</li>
+<li><code>DONE</code>: valid result converted to a public callback.</li>
+<li><code>TIMEOUT</code>: deadline expired first.</li>
+</ul>
+<p>There is no retry or election transition in this transaction. A timeout ends this client request.</p>
+<h2>4. Happy-path trace</h2>
+<p>Assume client C reads index 3 from replica R2.</p>
+<ol>
+<li>Application sends <code>ReadRequest(3, R2)</code> to C.</li>
+<li><code>AbstractClient.onReadRequest</code> calls <code>Client.sendRead(R2, 3)</code>.</li>
+<li>C allocates transaction ID <code>&lt;C,0&gt;</code>.</li>
+<li>C creates and schedules <code>ReadTransaction(&lt;C,0&gt;, index=3, destination=R2)</code>.</li>
+<li><code>start()</code> sends <code>ReadMsg(&lt;C,0&gt;, sender=C, index=3)</code>.</li>
+<li>The FSM enters <code>WAITING_RESULT</code> and schedules <code>ReadTimeoutMsg(&lt;C,0&gt;)</code> locally.</li>
+<li>R2’s receive builder matches <code>ReadMsg</code> and calls <code>onReadMsg</code>.</li>
+<li>R2 reads its local <code>positions[3]</code>, suppose 44.</li>
+<li>R2 replies with <code>ReadResultMsg(&lt;C,0&gt;, value=44, replicaId=2)</code>.</li>
+<li>C routes it to the current transaction by ID.</li>
+<li>The transaction cancels the timeout, enters <code>DONE</code>, invokes <code>callbackOnReadResult</code>, and completes.</li>
+<li>C starts the next queued request, if any.</li>
+</ol>
+<p>The replica does not create a <code>ReadTransaction</code>; only the client owns this FSM. The replica handles the request as one immediate operation.</p>
+<h2>5. Timeout trace</h2>
+<p>Now suppose R2 is already crash-simulated.</p>
+<ol>
+<li>C sends the same <code>ReadMsg</code> and schedules the timeout.</li>
+<li>R2 receives or has the message delivered, but its crashed behavior sends no reply.</li>
+<li>Akka scheduler later enqueues <code>ReadTimeoutMsg(&lt;C,0&gt;)</code> to C.</li>
+<li>C routes the timeout to the waiting transaction.</li>
+<li>The transaction enters <code>TIMEOUT</code> and invokes <code>callbackOnReadTimeout(client=C, replica=R2, index=3)</code>.</li>
+<li>The next client operation can start.</li>
+</ol>
+<p>The timeout is local and intentionally does not use the network channel.</p>
+<h2>6. Sequential consistency meaning</h2>
+<p>Reads return local replica state. If one client always sends operations to R2 and the client queue preserves order, that client sees R2’s values in R2’s application order.</p>
+<p>This is not linearizability. A read on R3 can return an older value while a valid update is still in transit. The specification accepts this local viewpoint while requiring eventual ordered application of writes.</p>
+<h2>7. Index validation issue</h2>
+<p><code>Replica</code> provides <code>getPosition(index)</code>, which checks that the index is between zero and the fixed array length minus one. The inspected read branch’s <code>onReadMsg</code> directly accesses <code>positions[msg.index]</code> instead.</p>
+<p>For a valid course request, behavior is the same. For an invalid index, direct access can throw <code>ArrayIndexOutOfBoundsException</code> rather than following the explicit validation policy. This is a real implementation detail to preserve in documentation, not a feature of the intended protocol.</p>
+<p>The specification does not clearly define invalid-client-index semantics, so a final implementation should state whether invalid input is rejected, times out, or returns a failed result.</p>
+<h2>8. Epoch metadata</h2>
+<p>The read branch creates <code>ReadMsg</code> with a null epoch pair and copies that metadata into the result. This is reasonable if reads are deliberately outside update ordering, but it remains a contract decision that should be explicit.</p>
+<p>A read does not need an epoch pair to return a local value. It may still be useful to include the replica’s observed epoch in a richer API, but that is beyond the supplied callback contract.</p>
+<h2>9. Stale result behavior</h2>
+<p>Suppose the timeout fires, the transaction completes, and then a delayed result arrives. The client now has no matching current ID—or has advanced to a newer ID—so <code>Client.onMessage</code> discards the result.</p>
+<p>That prevents two callbacks for one request. It also means a timeout cannot later be “corrected” into success.</p>
+<h2>10. Tests and their limits</h2>
+<p><code>TestReadTransaction.testReadTransaction</code> sets a replica’s position to 35, sends a read, and checks success, index, and value.</p>
+<p><code>testReadTransactionTimeout</code> crashes the target and checks the timeout’s index, replica, and client.</p>
+<p>Useful missing cases include:</p>
+<ul>
+<li>verifying the returned <code>fromReplica</code> field in the success test;</li>
+<li>invalid negative and too-large indexes;</li>
+<li>a late result after timeout;</li>
+<li>several queued reads preserving order;</li>
+<li>reading while updates are being applied; and</li>
+<li>running the feature in the final integrated branch.</li>
+</ul>
+<h2>11. Code map</h2>
+<ul>
+<li><code>AbstractClient.ReadRequest</code>: public entry object.</li>
+<li><code>Client.sendRead</code>: constructs and schedules the FSM.</li>
+<li><code>ReadTransaction.start</code>: sends request and schedules timeout.</li>
+<li><code>Replica.onReadMsg</code>: performs local lookup and replies.</li>
+<li><code>ReadTransaction.computeState</code>: handles result or timeout.</li>
+<li><code>AbstractClient.callbackOnReadResult/Timeout</code>: observable output.</li>
+<li><code>TestReadTransaction</code>: focused branch tests.</li>
+<li><code>charts/Transactions/transaction_Read.mmd</code>: success and crash sequences.</li>
+</ul>
+<h2>12. Exam rehearsal</h2>
+<p><strong>Why does the replica not ask the coordinator?</strong> The project specifies local reads and sequential consistency per replica, so coordination would add cost beyond the required contract.</p>
+<p><strong>Why does the timeout carry the transaction ID?</strong> It must return through the same client dispatcher and affect only the request that scheduled it.</p>
+<p>The invariant to remember is: <strong>a read returns exactly one local snapshot result or one timeout callback for the currently active client transaction.</strong></p>
+<h2>13. Read FSM as a traceable state machine</h2>
+<pre class="diagram">INIT --start--> WAITING_RESULT --ReadResultMsg--> DONE
+                         |
+                         +--------ReadTimeoutMsg--------> TIMEOUT
+
+DONE/TIMEOUT: cancel timer, callback once, remove active transaction</pre>
+<p>The read protocol is intentionally smaller than the write protocol. It sends
+one request to a chosen replica and waits. “Local read” means the selected
+replica reads its own materialized array; it does not mean the client bypasses
+the transaction framework or that every replica already has the same value.</p>
+<h2>14. Code microscope: request, validation, completion</h2>
+<p>Read the implementation in this order:</p>
+<ol>
+<li><strong>Construction:</strong> record client, target replica, index, and transaction ID.</li>
+<li><strong>Start:</strong> schedule a timeout and send <code>ReadMsg</code> to the target.</li>
+<li><strong>Replica handler:</strong> validate the message belongs to this read and obtain
+the value at the requested index.</li>
+<li><strong>Result handler:</strong> stop accepting duplicate results, cancel the timer, and
+call <code>callbackOnReadResult</code>.</li>
+<li><strong>Timeout handler:</strong> use the same cleanup path but call
+<code>callbackOnReadTimeout</code>.</li>
+</ol>
+<p>In the read feature branch, the replica-side <code>onReadMsg</code> directly indexes the
+positions array in one path. That is a useful code-review lesson: a protocol
+can have a correct happy-path FSM while still lacking input validation. A
+negative or too-large index should produce a controlled failure/timeout rather
+than an accidental <code>ArrayIndexOutOfBoundsException</code>.</p>
+<pre class="code-microscope">// Safer conceptual boundary
+if (index &lt; 0 || index &gt;= positions.length) {
+    replyInvalidIndexOrTimeout(msg.transactionId());
+    return;
+}
+reply(new ReadResultMsg(msg.transactionId(), positions[index]));</pre>
+<h2>15. Sequential consistency and stale results</h2>
+<p>If one client queues <code>write(x=7)</code> followed by <code>read(x)</code>, the client queue
+prevents the read from starting before the write transaction completes. If a
+different client reads a lagging follower, the result can still be older; that
+is a system-level replication question, not a read-FSM bug. During recovery,
+the read target should also be checked against the protocol’s “safe to serve”
+state if the specification forbids reads from a stale replica.</p>
+<h3>Practice</h3>
+<p>Add tests for invalid index, duplicate <code>ReadResultMsg</code>, result-after-timeout,
+and a read sent to a crashed target. For each, state whether the expected
+outcome is a callback, a timeout, or silent stale-message rejection.</p>
+</body>
+</html>

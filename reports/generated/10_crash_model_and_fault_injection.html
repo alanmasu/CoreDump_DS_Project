@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Crash Model and Deterministic Fault Injection</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}
+</style>
+</head>
+<body>
+<h1>Crash Model and Deterministic Fault Injection</h1>
+<blockquote>
+<p><strong>Learning goal.</strong> Understand how the repository simulates crash-stop nodes without killing Akka actors and how tests request failures at precise protocol moments.</p>
+</blockquote>
+<p><strong>Current implementation inspected:</strong> <code>feature/electionTransaction</code> at <code>d1222a2</code>.<br />
+<strong>Update-category reference:</strong> <code>origin/feat/UpdateTransaction</code> at <code>59bbe80</code>.</p>
+<h2>1. A simulated crash is a behavior mode</h2>
+<p>The project does not terminate the Akka actor process. <code>Replica</code> instead tracks:</p>
+<pre><code class="language-text">NONE -&gt; PENDING -&gt; CRASHED
+</code></pre>
+<ul>
+<li><code>NONE</code>: normal behavior.</li>
+<li><code>PENDING</code>: a test requested a crash after a selected number/type of messages.</li>
+<li><code>CRASHED</code>: protocol receives and sends are ignored.</li>
+</ul>
+<p>This models the external effect of a crash-stop replica while keeping the actor address stable for tests.</p>
+<h2>2. Crash request object</h2>
+<p><code>AbstractReplica.Crash</code> contains:</p>
+<ul>
+<li><code>type</code>: the protocol point to monitor;</li>
+<li><code>after_n_messages_of_type</code>: the threshold.</li>
+</ul>
+<p>Defined categories include:</p>
+<ul>
+<li><code>Now</code></li>
+<li><code>Heartbeat</code></li>
+<li><code>Update</code></li>
+<li><code>WriteOK</code></li>
+<li><code>Election</code></li>
+</ul>
+<p>The specification needs such instrumentation because failures must be demonstrated not only between operations, but during broadcast, after observation, during commit dissemination, and during election.</p>
+<h2>3. Immediate crash</h2>
+<p>For <code>Crash.Type.Now</code>, <code>Replica.crash</code> moves directly to <code>CRASHED</code> and logs it. No protocol event counter is needed.</p>
+<p>The actor remains alive and can still receive mailbox messages, including old scheduled events. Protocol handlers and send helpers must check crash state so those messages have no external effect.</p>
+<h2>4. Pending crash counters</h2>
+<p>For other categories, the replica stores the request, resets <code>crashCount</code>, and enters <code>PENDING</code>.</p>
+<p><code>updateCrashStatusCallback(Msg)</code> classifies selected messages. When a message matches the requested category, it increments the count. At or above the threshold, it marks the replica crashed.</p>
+<p>This creates a deterministic test instruction such as:</p>
+<pre><code class="language-text">Crash after processing/sending the second election-related event.
+</code></pre>
+<p>The exact location of the callback determines whether “after” means before forwarding, after forwarding one message, or after an entire broadcast loop.</p>
+<h2>5. Incoming and outgoing counting</h2>
+<p>The callback is invoked in two broad places:</p>
+<ul>
+<li>after the transaction dispatcher successfully delivers an incoming <code>Msg</code>; and</li>
+<li>after <code>broadcast</code> or <code>unicast</code> sends protocol traffic.</li>
+</ul>
+<p>Therefore a category can count both received and sent events depending on class and control path. <code>broadcast</code> invokes the callback once after iterating destinations, not once per recipient. A crash threshold counts broadcast operations, not individual network enqueues.</p>
+<p>This detail must be documented because a test expecting “crash after two recipients” would not get that behavior from the current helper.</p>
+<h2>6. Current category mappings</h2>
+<p>On the election branch:</p>
+<ul>
+<li>heartbeat category matches <code>HeartbeatMsg</code> and <code>WatchdogExpiredMsg</code>;</li>
+<li>WRITEOK category currently matches <code>WriteFinishMsg</code>;</li>
+<li>election category matches election token, ACK, ACK timeout, rejection, and synchronization.</li>
+</ul>
+<p>The update feature branch additionally classifies <code>UpdateMsg</code>, <code>UpdateTimeoutMsg</code>, <code>UpdateAckMsg</code>, <code>WriteOkMsg</code>, and <code>WriteOkTimeoutMsg</code> as update-category events.</p>
+<p>Because the branches are not integrated, the current branch cannot inject every update-stage crash required by the final specification. Also note that <code>WriteFinishMsg</code> is a local parent-completion signal, not the distributed <code>WriteOkMsg</code>; category naming and mapping should be reconciled in final integration.</p>
+<h2>7. Ignoring outgoing traffic</h2>
+<p><code>Replica.broadcast</code> and <code>unicast</code> return immediately when status is <code>CRASHED</code>. This ensures a queued timer cannot make a dead coordinator emit a heartbeat or continue an election.</p>
+<p><code>unicast</code> also refuses self-delivery. Protocol-local notifications that must occur on the owner use direct <code>getSelf().tell(...)</code> and therefore need their own crash-aware receive path.</p>
+<h2>8. Ignoring incoming traffic</h2>
+<p><code>Replica.onMessage</code>, election entry handlers, and synchronization handlers check crash state. A complete integration must make every special receive handler equally crash-aware; otherwise a message that bypasses generic dispatch can still mutate dead-replica state.</p>
+<p>The actor is not removed from membership. Other replicas continue sending until their timeout logic marks it unavailable or elects around it.</p>
+<h2>9. Timers after crash</h2>
+<p>Crashing does not cancel every active <code>Cancellable</code>. Old ticks and timeouts may still enter the mailbox. Correct crashed behavior ignores them before they send or change externally visible state.</p>
+<p>This approach is simpler than tracking and cancelling every timer, but it means crash guards are a correctness boundary. One missing guard can resurrect behavior.</p>
+<h2>10. Crash-stop versus pause or recovery</h2>
+<p>The state machine has no transition out of <code>CRASHED</code>. That matches the specification: replicas fail by crashing and do not recover.</p>
+<p>This is different from:</p>
+<ul>
+<li>a temporary network partition;</li>
+<li>a slow node;</li>
+<li>Akka actor restart under supervision;</li>
+<li>process recovery from disk; or</li>
+<li>Byzantine behavior sending false messages.</li>
+</ul>
+<p>Do not claim the protocol tolerates these stronger models.</p>
+<h2>11. Fault scenarios to demonstrate</h2>
+<p>A strong exam demonstration set includes:</p>
+<ol>
+<li>follower crashes immediately; quorum update still completes;</li>
+<li>coordinator crashes before phase-one broadcast; initiating replica detects missing UPDATE;</li>
+<li>coordinator crashes after some UPDATEs; election collects freshest observed state;</li>
+<li>coordinator crashes during WRITEOK; recovery completes uniform delivery;</li>
+<li>next ring neighbor crashes; election ACK timeout skips it;</li>
+<li>best candidate crashes; remaining candidates still terminate;</li>
+<li>stale watchdog arrives after heartbeat and is ignored.</li>
+</ol>
+<p>The current split implementation does not yet support every scenario end to end. The gap itself must be recorded.</p>
+<h2>12. Testing principles</h2>
+<p>For a deterministic crash test, assert four things:</p>
+<ul>
+<li>the crash was requested at the intended state;</li>
+<li>the expected count was reached;</li>
+<li>no later outbound protocol event came from that replica; and</li>
+<li>surviving replicas reached the required result within a justified bound.</li>
+</ul>
+<p>Sleeping and hoping is weaker than observing callbacks/messages with TestKit. Time-based assertions should derive from configured latency and protocol hops.</p>
+<h2>13. Exam rehearsal</h2>
+<p><strong>Why keep the actor alive after a simulated crash?</strong> It gives tests a stable address and deterministic instrumentation while handlers emulate the observable behavior of a dead node.</p>
+<p><strong>What is the main implementation risk?</strong> A special handler or direct self-message path can forget the crash guard and let a supposedly dead replica act.</p>
+<p>The invariant to remember is: <strong>after transition to <code>CRASHED</code>, no incoming or queued event may cause protocol output or application-state progress.</strong></p>
+<h2>14. A crash is a state-machine transition</h2>
+<pre class="diagram">NONE --crash event--> PENDING --apply at configured point--> CRASHED
+  |                                               |
+  +-------------- normal protocol ---------------+
+
+CRASHED: ignore client requests, network messages, timers, and callbacks
+         until the test/model explicitly restarts or replaces the actor</pre>
+<p>The three categories describe <em>when</em> a fault is injected, not three different
+Java exceptions. A pending crash may allow an already queued event to finish;
+the crashed state must then block subsequent work. Read the category mapping
+carefully because feature branches may count “crash after update” at a different
+instruction than the base implementation.</p>
+<h2>15. Code microscope: guard every entry point</h2>
+<p>Checking <code>crashed</code> in the ordinary network handler is not enough. Akka actors
+also receive special entry messages, self-sent messages, scheduler callbacks,
+and client requests. A useful review table is:</p>
+<table><tr><th>Entry point</th><th>What a crashed replica must do</th></tr>
+<tr><td><code>NetworkChannel</code> delivery</td><td>ignore without ACK or state mutation</td></tr>
+<tr><td>heartbeat tick/watchdog</td><td>do not emit a new heartbeat or election twice</td></tr>
+<tr><td>client read/write</td><td>return the specified failure/timeout, or remain silent</td></tr>
+<tr><td>crash control message</td><td>transition once; duplicate control is idempotent</td></tr>
+<tr><td>queued protocol message</td><td>re-check status at handling time</td></tr></table>
+<pre class="code-microscope">void onMessage(Message m) {
+    if (crashStatus == CRASHED) return; // central safety guard
+    if (m instanceof CrashNow) {
+        crashStatus = CRASHED;
+        return;
+    }
+    routeToTransaction(m);
+}</pre>
+<p>The real design may distribute these checks across handlers. During review,
+trace every special path and ask whether it can call a callback or mutate
+<code>positions[]</code> after the status changes.</p>
+<h2>16. Fault injection as a deterministic experiment</h2>
+<p>A strong test names the injection point and observes a protocol consequence:
+“crash coordinator after receiving the third ACK; surviving replicas elect a
+candidate and preserve the committed epoch.” It is weaker to sleep and assert
+that “something eventually happened.” Use TestKit probes, callback messages,
+and explicit actor status where possible. Record both what the crashed actor
+did not do and what the survivors did do.</p>
+<h3>Practice</h3>
+<p>For each crash category, choose one message that may complete before the crash
+and one that must be rejected after it. Explain why the answer changes when the
+crash is injected before versus after a WRITEOK.</p>
+</body>
+</html>

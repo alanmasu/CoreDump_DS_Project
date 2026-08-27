@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Observability, Testing, and Verification Infrastructure</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}
+</style>
+</head>
+<body>
+<h1>Observability, Testing, and Verification Infrastructure</h1>
+<blockquote>
+<p><strong>Learning goal.</strong> Learn how the repository makes actor behavior observable, what each test/build tool proves, and how to avoid claiming more validation than the evidence supports.</p>
+</blockquote>
+<p><strong>Build snapshot:</strong> <code>feature/electionTransaction</code> at <code>d1222a2</code>.<br />
+<strong>Key files:</strong> <code>Logger.java</code>, abstract callbacks, <code>TestsCommons.java</code>, base/regression/contract tests, <code>build.gradle</code>, <code>.github/workflows/ci.yml</code>, <code>charts/</code>.</p>
+<h2>1. Why distributed tests need observability</h2>
+<p>Most important state lives inside actors and cannot be read directly. Messages also arrive asynchronously. A test therefore needs stable public observations:</p>
+<ul>
+<li>client result/timeout callbacks;</li>
+<li>replica update/election callbacks;</li>
+<li>TestKit probes receiving those callback objects;</li>
+<li>protocol messages captured by probes;</li>
+<li>logs for human traces; and</li>
+<li>bounded waiting based on configured timing.</li>
+</ul>
+<p>Testing only private fields would bypass the actor model and give false confidence about real message flows.</p>
+<h2>2. Logger contract</h2>
+<p>The supplied <code>Logger</code> produces timestamped INFO/DEBUG lines to stdout or a file. <code>AbstractClient</code> and <code>AbstractReplica</code> prepend actor identity.</p>
+<p>Direct <code>System.out.println</code> inside hot protocol paths is discouraged because strict timing tests can be disturbed by slow I/O. Debug logging can be disabled, and all logging can be disabled during tests.</p>
+<p><code>Logger</code> synchronizes access to its shared writer. This static lock is infrastructure-level shared state; protocol application state remains actor-owned.</p>
+<p>Logs help answer “what happened?” but do not prove correctness. Missing or reordered log output can also reflect buffering/timing rather than protocol state.</p>
+<h2>3. Mandatory callbacks</h2>
+<p>Client callbacks:</p>
+<ul>
+<li>read result;</li>
+<li>write result;</li>
+<li>read timeout;</li>
+<li>write timeout.</li>
+</ul>
+<p>Replica callbacks:</p>
+<ul>
+<li>update applied;</li>
+<li>election started;</li>
+<li>coordinator elected.</li>
+</ul>
+<p>Each callback logs and forwards a small immutable result object to the optional listener. Tests pass a TestKit actor as listener and assert those events.</p>
+<p>Callback timing is semantic. For example, <code>callbackOnUpdateApplied</code> belongs immediately after actual local <code>positions[]</code> mutation, not merely after receiving UPDATE.</p>
+<h2>4. TestKit mental model</h2>
+<p>A TestKit probe is a controlled actor mailbox for a test. The system sends it ordinary messages; test code asks for the next message of a class, fishes for a matching message, or asserts no message arrives for a duration.</p>
+<p>Useful patterns:</p>
+<pre><code class="language-text">expectMsgClass(Result.class)     wait for one result
+expectNoMessage(duration)       assert silence in a window
+fishForMessage(...)             ignore unrelated events until target
+</code></pre>
+<p>Negative timing assertions must be chosen carefully. “No message for 50 ms” proves little if the valid path can take 100 ms.</p>
+<h2>5. <code>TestsCommons</code></h2>
+<p><code>createTestSystem</code>:</p>
+<ol>
+<li>creates an <code>ActorSystem</code>;</li>
+<li>creates one listener probe per replica;</li>
+<li>creates replicas with configurable latency/heartbeat interval;</li>
+<li>sends <code>InitSystem</code> to all; and</li>
+<li>returns actors, probes, and derived timeout values.</li>
+</ol>
+<p>Timing helpers estimate read, write, update, and election windows from max latency, replica count, and heartbeat interval. These are test budgets, not formal proofs of worst-case Akka scheduling.</p>
+<p><code>getMaxUpdateDelay</code> comments model four logical hops: client to replica, replica to coordinator, coordinator broadcast/ACK round, and WRITEOK/result progression, with jitter allowance.</p>
+<h2>6. Three test layers</h2>
+<h3>Course base tests</h3>
+<p><code>src/test/java/it/unitn/ds/base</code> is supplied contract/integration coverage. <code>APICompliance</code> checks required construction and API behavior. <code>NoCrashes</code> and <code>WithCrashes</code> run longer system scenarios.</p>
+<p>These are the acceptance boundary: the README says all base tests must pass.</p>
+<h3>Project regression tests</h3>
+<p><code>src/test/java/it/unitn/ds/regression</code> contains focused tests written during development:</p>
+<ul>
+<li>message equality;</li>
+<li>epoch comparison;</li>
+<li>dispatcher routing;</li>
+<li>read/write wrappers;</li>
+<li>update feature behavior;</li>
+<li>heartbeat behavior; and</li>
+<li>election data structures/validation.</li>
+</ul>
+<p>Regression tests should be fast and isolate one invariant or bug.</p>
+<h3>Callback contract tests</h3>
+<p><code>TestCallbackContract</code> uses ArchUnit bytecode inspection to ask whether any project class calls every mandatory callback.</p>
+<p>This is a static checklist. It catches “callback is never called anywhere.” It does not catch wrong timing, wrong arguments, duplicate calls, or unreachable paths.</p>
+<p>The task is deliberately separate because callbacks for unfinished features keep it red during development.</p>
+<h2>7. Gradle test tasks</h2>
+<ul>
+<li><code>./gradlew test</code>: base plus regression tests, excluding contract tag.</li>
+<li><code>./gradlew regression</code>: only project regression package.</li>
+<li><code>./gradlew callbackContract</code>: static callback checklist.</li>
+<li><code>./gradlew regressionCoverage</code>: JaCoCo for the fast regression suite.</li>
+<li><code>./gradlew testCoverage</code>: complete base and regression coverage.</li>
+</ul>
+<p>The build requires Java 25 and configures the toolchain resolver. The CI workflow installs Java 25 and Gradle 9.2.1, creates the wrapper, then runs regression tests for pull requests to main.</p>
+<p>CI evidence belongs to one exact commit. A green feature-branch check does not prove a later merge commit.</p>
+<h2>8. Coverage</h2>
+<p>JaCoCo measures executed lines and branches. It does not determine whether assertions are correct or whether protocol properties hold.</p>
+<p>Coverage is most useful for finding unvisited failure paths:</p>
+<ul>
+<li>stale timeout branch;</li>
+<li>wrong coordinator filter;</li>
+<li>duplicate message branch;</li>
+<li>election skip path; and</li>
+<li>synchronization rejection.</li>
+</ul>
+<p>Template infrastructure is excluded so project coverage is not diluted by supplied code.</p>
+<p>High coverage with weak assertions can still miss a broken protocol. Low coverage reliably identifies places nobody tested.</p>
+<h2>9. Static analysis suite</h2>
+<p>The build integrates:</p>
+<ul>
+<li><strong>PMD:</strong> source-level smells/rules;</li>
+<li><strong>SpotBugs:</strong> bytecode dataflow suspicions;</li>
+<li><strong>CPD:</strong> duplicated token blocks;</li>
+<li><strong>Spotless:</strong> formatting output/check support;</li>
+<li><strong>ArchUnit:</strong> callback architecture rules.</li>
+</ul>
+<p><code>staticAnalysis</code> combines reports and prints editor-clickable findings. PMD and SpotBugs use <code>ignoreFailures = true</code>, meaning task completion does not mean zero findings. The final count and report files must be inspected.</p>
+<p>Static analysis can find probable local bugs. It cannot prove quorum, total order, uniform agreement, or election liveness.</p>
+<h2>10. VS Code integration</h2>
+<p>Tracked tasks attach problem matchers so tests and analysis findings appear at source lines. Continuous analysis re-runs on save.</p>
+<p>This is developer ergonomics, not runtime architecture, but it affects how reliably findings are noticed. Running a Gradle command in an ordinary terminal may produce the same text without VS Code diagnostics.</p>
+<h2>11. Protocol diagrams</h2>
+<p><code>charts/</code> contains:</p>
+<ul>
+<li>system and actor UML;</li>
+<li>transaction/message UML;</li>
+<li>healthy and failure sequences;</li>
+<li>heartbeat coordinator/follower FSMs;</li>
+<li>election sequence/FSM; and</li>
+<li>intended read/write/update traces.</li>
+</ul>
+<p>Diagrams are explanatory artifacts, not automatically generated truth. Compare every arrow with current constructors, receive handlers, network/local paths, and branch status. Some diagrams describe intended update behavior not integrated in the current source.</p>
+<h2>12. Evidence ladder</h2>
+<p>From weakest to strongest for a behavior claim:</p>
+<ol>
+<li>comment or TODO describes intention;</li>
+<li>diagram shows proposed flow;</li>
+<li>code contains a path;</li>
+<li>focused test executes the path with meaningful assertions;</li>
+<li>integration test exercises interacting actors/failures;</li>
+<li>exact commit passes required suite/CI;</li>
+<li>correctness argument connects tested mechanisms to stated assumptions.</li>
+</ol>
+<p>No single level replaces all others.</p>
+<h2>13. Current validation snapshot</h2>
+<p>Prior recorded validation for election commit <code>d1222a2</code> showed focused election and regression tasks passing, while callback contract still had unrelated missing read/update callbacks and static analysis reported findings. That evidence is historical to this commit and environment.</p>
+<p>For these documentation PDFs, source/render validity is checked separately; the task does not modify Java behavior or claim a fresh full protocol test pass.</p>
+<h2>14. Building a good protocol test</h2>
+<p>A strong test names one invariant, arranges a concrete state, triggers one event sequence, and checks externally visible effects plus forbidden effects.</p>
+<p>Example stale watchdog test:</p>
+<ol>
+<li>initialize follower with short heartbeat interval;</li>
+<li>capture watchdog version 1 event;</li>
+<li>deliver valid heartbeat, causing version 2;</li>
+<li>inject expiry for version 1;</li>
+<li>assert no election callback;</li>
+<li>inject expiry for version 2;</li>
+<li>assert exactly one election callback.</li>
+</ol>
+<p>This demonstrates why the version check matters, not merely that lines execute.</p>
+<h2>15. Codebase coverage map</h2>
+<p>This report set assigns every maintained source area to an educational report:</p>
+<ul>
+<li><code>Main</code>, <code>AbstractClient</code>, <code>AbstractReplica</code>, and actor factories: reports 01 and 05.</li>
+<li><code>NetworkChannel</code> and replica send helpers: report 02.</li>
+<li><code>DistributedActor</code>, <code>Transaction</code>, <code>Msg</code>, <code>EpochPair</code>, dispatchers, and <code>ProbeTransaction</code>: reports 03 and 04.</li>
+<li><code>Client</code>: reports 05–07.</li>
+<li>branch-only <code>ReadTransaction</code>: report 06.</li>
+<li><code>WriteTransaction</code>: report 07.</li>
+<li>branch-only <code>UpdateTransaction</code>: report 08.</li>
+<li><code>HeartbeatTransaction</code>: report 09.</li>
+<li>crash fields/handlers across abstract and concrete replica code: report 10.</li>
+<li><code>ElectionTransaction</code> and election-specific <code>Replica</code> handlers: report 11.</li>
+<li>synchronization and heartbeat replacement in <code>Replica</code>: report 12.</li>
+<li><code>Logger</code>, <code>TestsCommons</code>, base/regression/contract tests, Gradle tasks, CI, PMD/SpotBugs configuration, and VS Code tasks: this report.</li>
+<li>the specification PDFs and all cross-protocol guarantees: reports 00 and 14.</li>
+<li><code>charts/UML</code>, <code>charts/Transactions</code>, and <code>charts/protocol.mmd</code>: referenced by the matching architecture/protocol reports and assessed here as documentation evidence.</li>
+<li><code>docs/ELECTION_TRANSACTION_PLAN.md</code>: election working notes; useful historical context, not automatically current behavior.</li>
+</ul>
+<p>Generated <code>.gradle/</code> and <code>build/</code> contents are build outputs rather than maintained subsystem source. They are evidence only when a report explicitly cites a generated test, coverage, PMD, SpotBugs, CPD, or JaCoCo result.</p>
+<h2>16. Exam rehearsal</h2>
+<p><strong>What does callbackContract prove?</strong> Only that compiled project code invokes each callback somewhere.</p>
+<p><strong>What does green regression CI prove?</strong> The configured regression task passed on that exact checked-out commit/environment; it does not prove untested protocol properties or later integration.</p>
+<p>The invariant to remember is: <strong>every correctness claim should name both the mechanism in code and the test or reasoning evidence that supports it.</strong></p>
+<h2>17. The evidence pipeline</h2>
+<pre class="diagram">source code -> focused unit test -> regression scenario
+     |                 |                    |
+     +--> callback/log/probe observation ---+
+                           |
+                    claim with limits
+                           |
+                 build/SCA/CI evidence (when available)</pre>
+<p>Think of a test as an instrument, not a magic stamp. A focused test can show
+that a timeout message is routed to the right transaction. A regression test
+can show that a five-replica write eventually completes. Neither alone proves
+all crash interleavings. The report should always state the observation and the
+unobserved cases.</p>
+<h2>18. Code microscope: read a TestKit test backwards</h2>
+<p>Start with the final assertion and ask what mechanism could make it true. If a
+test expects a probe to receive <code>CallbackOnCoordinatorElected</code>, trace backwards:</p>
+<ol>
+<li>which actor sent the callback;</li>
+<li>which election state called that sender;</li>
+<li>which timeout or ACK caused the transition;</li>
+<li>which fixture supplied membership, delays, and crash status; and</li>
+<li>whether the test checked exactly-once behavior or merely eventual presence.</li>
+</ol>
+<pre class="code-microscope">// Conceptual assertion anatomy
+probe.expectMsg(CoordinatorElected(id));
+// proves an observable event, not automatically:
+// - all replicas installed the same epoch
+// - no duplicate callback was emitted
+// - pending writes were recovered</pre>
+<p>This backwards reading habit is especially useful with <code>TestDispatcher</code> and
+<code>TestsCommons</code>, where helper methods hide actor creation and timing settings.
+Open the helper before trusting what a short test appears to configure.</p>
+<h2>19. Designing a high-value protocol test</h2>
+<p>Name one invariant, one perturbation, and one observable result. Example:</p>
+<table><tr><th>Invariant</th><th>Perturbation</th><th>Observable result</th></tr>
+<tr><td>duplicate WRITEOK is idempotent</td><td>deliver the same message twice</td><td>one history entry and one state mutation</td></tr>
+<tr><td>stale watchdog is harmless</td><td>deliver v6 after v7</td><td>no election callback for v6</td></tr>
+<tr><td>queue preserves session order</td><td>enqueue write then read</td><td>read starts only after write completion</td></tr></table>
+<p>Add a negative assertion where possible: “probe receives no second callback
+within the bounded test window.” Avoid arbitrary sleeps; derive the window from
+configured channel delay plus protocol hops and explain the margin.</p>
+<h3>Practice</h3>
+<p>Choose one claim from each of the read, heartbeat, election, and recovery
+reports. For each, write what a unit test can establish and what integration or
+formal reasoning is still needed.</p>
+</body>
+</html>

@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>End-to-End Correctness and Corner Cases</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}
+</style>
+</head>
+<body>
+<h1>End-to-End Correctness and Corner Cases</h1>
+<blockquote>
+<p><strong>Purpose.</strong> This is a cross-subsystem study report showing how to reason about the complete intended system. It is <strong>not</strong> the final exam report and does not claim the split feature branches form a verified implementation.</p>
+</blockquote>
+<p><strong>Sources compared:</strong> specification, <code>origin/main</code> <code>84846dc</code>, read <code>1ed58b6</code>, write <code>8c42a18</code>, update <code>59bbe80</code>, and election <code>d1222a2</code>.</p>
+<h2>1. How to reason about a distributed implementation</h2>
+<p>Reading classes one at a time is not enough. Correctness lives in connections:</p>
+<ul>
+<li>Who creates an ID?</li>
+<li>Which messages carry it?</li>
+<li>When does a value become visible?</li>
+<li>Which timeout takes responsibility after silence?</li>
+<li>What old messages can still arrive after a role change?</li>
+<li>What evidence survives a crash?</li>
+</ul>
+<p>For every scenario, trace actor state, transaction state, message queues, timers, and replicated history separately.</p>
+<h2>2. Core invariants</h2>
+<h3>Actor encapsulation</h3>
+<p>Each actor owns its mutable state. Messages crossing actors do not expose mutable arrays/lists.</p>
+<h3>Transaction routing</h3>
+<p>Every simultaneously active local FSM has a unique <code>TransactionId</code>. A message is processed only by its intended transaction and only when valid for the current state/generation.</p>
+<h3>Update identity</h3>
+<p>Every logical update has one stable, unique <code>EpochPair</code> carried consistently through proposal, acknowledgement, commit, history, and recovery.</p>
+<h3>At-most-once application</h3>
+<p>A replica applies each ordered update no more than once and only after valid commit evidence.</p>
+<h3>Total order</h3>
+<p>All correct replicas apply committed updates in ascending epoch/sequence order.</p>
+<h3>Uniform agreement</h3>
+<p>If any replica applies an update, every correct replica eventually applies it, even if the first replica later crashes.</p>
+<h3>Term transition</h3>
+<p>Old required work is recovered before new-coordinator updates begin.</p>
+<h3>Crash-stop behavior</h3>
+<p>After a replica becomes crashed, no queued or incoming event causes further protocol output or application progress.</p>
+<h2>3. Healthy write scenario</h2>
+<p>To argue a healthy write:</p>
+<ol>
+<li>Client queue selects one request and allocates parent ID.</li>
+<li>Contacted replica creates matching parent and distinct child update ID.</li>
+<li>Coordinator serializes the child update against other writes.</li>
+<li>Coordinator assigns next epoch pair before UPDATE.</li>
+<li>Followers record exactly that proposal and ACK once.</li>
+<li>Distinct ACK set reaches strict majority.</li>
+<li>Coordinator sends WRITEOK in assigned order and applies once.</li>
+<li>Followers apply once in same order.</li>
+<li>Trigger child completes parent; parent returns result; client advances queue.</li>
+</ol>
+<p>The feature branches currently implement pieces of this trace but not all invariants: stable pre-broadcast epoch assignment, distinct ACK tracking, actual position mutation on the update branch, and integrated serialization require attention.</p>
+<h2>4. Concurrent clients</h2>
+<p>Client A and B each serialize their own operations, but their requests can reach different replicas concurrently. The contacted replicas can forward child updates concurrently.</p>
+<p>The coordinator must decide one order:</p>
+<pre><code class="language-text">UA gets &lt;e,7&gt;, UB gets &lt;e,8&gt;
+</code></pre>
+<p>FIFO coordinator-to-follower channels then preserve that send order. If the coordinator runs both update FSMs without an ordering queue or stable assignment discipline, ACK timing can cause inconsistent commit order.</p>
+<p>Therefore “actors process one message at a time” is helpful but insufficient: the coordinator may interleave messages for multiple active FSMs across mailbox turns.</p>
+<h2>5. Follower crash during normal update</h2>
+<p>With five replicas and quorum three, one follower can crash without blocking progress.</p>
+<p>Safety reasoning:</p>
+<ul>
+<li>coordinator counts only itself plus distinct follower ACKs;</li>
+<li>WRITEOK is sent only after three witnesses;</li>
+<li>crashed follower applies nothing further;</li>
+<li>reliable channels deliver WRITEOK to surviving followers;</li>
+<li>recovery history retains the ordered update.</li>
+</ul>
+<p>Liveness reasoning:</p>
+<ul>
+<li>coordinator does not wait for every follower;</li>
+<li>a surviving strict majority is sufficient.</li>
+</ul>
+<p>The inspected partial update branch counts ACK messages rather than distinct sender IDs, so the intended argument needs a stronger concrete implementation.</p>
+<h2>6. Coordinator crashes before UPDATE</h2>
+<p>State:</p>
+<ul>
+<li>client waits on parent write;</li>
+<li>trigger replica owns child request;</li>
+<li>no follower has observed coordinator broadcast.</li>
+</ul>
+<p>Responsibility transfers through the trigger’s missing-UPDATE timeout. It starts/join election, waits for synchronization, then resubmits or reconstructs the request under the new coordinator.</p>
+<p>Heartbeat may also detect failure, but the update-stage timeout gives a request-specific signal. The update branch’s timeout-to-election/retry behavior is still commented out.</p>
+<h2>7. Coordinator crashes after UPDATE but before quorum</h2>
+<p>Some replicas have observed the update; none should apply without WRITEOK. Election candidates advertise freshness, enabling a replica with the newest observation to win.</p>
+<p>Recovery must decide how to handle the partial proposal. The specification favors completing interrupted work to prevent losing a value that might have been delivered. An immutable history record is necessary to know <code>(index,value,epochPair)</code>.</p>
+<p>A positions-only snapshot may not include an observed-but-unapplied update, so it cannot fully implement this reasoning.</p>
+<h2>8. Coordinator crashes after quorum or during WRITEOK</h2>
+<p>This is the critical uniform-agreement case. Some replicas may apply; others may only have observed.</p>
+<p>The new coordinator must:</p>
+<ol>
+<li>gather/possess the freshest ordered history;</li>
+<li>detect the incomplete commit dissemination;</li>
+<li>resend/complete the required update idempotently;</li>
+<li>ensure correct survivors apply it once; and</li>
+<li>only then begin the new epoch’s normal writes.</li>
+</ol>
+<p>Client timeout or coordinator death does not authorize rollback of an update already applied anywhere.</p>
+<h2>9. Silent coordinator crash</h2>
+<p>With no active updates, followers rely on heartbeat watchdogs.</p>
+<p>False-election prevention requires:</p>
+<ul>
+<li>heartbeat interval and latency-aware watchdog budget;</li>
+<li>reset only for expected coordinator;</li>
+<li>cancellation plus watchdog generation;</li>
+<li>one election request after current expiry; and</li>
+<li>replacement of heartbeat FSM after synchronization.</li>
+</ul>
+<p>Current heartbeat and election branches implement much of this handoff, though test coverage remains focused rather than exhaustive.</p>
+<h2>10. Next ring node crashes</h2>
+<p>Election sender forwards token and schedules ACK timeout tied to target and attempt version. On current timeout it marks target unavailable and chooses the next ring ID.</p>
+<p>Progress measure: each failed attempt permanently adds one unavailable ID for that local election. Static finite membership and surviving majority prevent endless retry of the same neighbor.</p>
+<p>Late ACK/timeout from a previous attempt must not clear or redirect current pending state.</p>
+<h2>11. Best election candidate crashes</h2>
+<p>After token collection, the best candidate may fail before accepting leadership. The election FSM tries to send the final list to the winner. If forwarding fails, it removes that candidate and recomputes from the remaining set.</p>
+<p>The safety question is whether the removed candidate held unique required history. The majority assumption says at least one correct member should know the most recent update, but the concrete history/evidence representation must make that claim true.</p>
+<h2>12. Competing elections</h2>
+<p>Staggered starts reduce collisions. If two still exist, replicas choose one preferred initiator deterministically and reject the loser.</p>
+<p>For convergence, every replica must apply the same preference rule and scope the comparison to the same failed coordinator. Completed-term sets reject later stale tokens.</p>
+<p>Election transaction preference does not choose the final coordinator; it chooses which token performs candidate collection. Final candidate freshness still determines the winner.</p>
+<h2>13. Late old-term traffic</h2>
+<p>After synchronization, old heartbeat ticks, watchdog expiries, UPDATEs, ACKs, WRITEOKs, election timeouts, and tokens may remain queued.</p>
+<p>Defenses include:</p>
+<ul>
+<li>transaction IDs scoped to old owner/term;</li>
+<li>removing old FSMs from active routing;</li>
+<li>strictly newer epoch validation;</li>
+<li>state and attempt/watchdog versions;</li>
+<li>completed-election sets; and</li>
+<li>sender/coordinator membership validation.</li>
+</ul>
+<p>Every message type needs an explicit stale policy. FIFO cannot solve cross-sender or local-timer interleavings.</p>
+<h2>14. Read during update or recovery</h2>
+<p>Reads are local and can occur while an update is in transit. Before WRITEOK, a replica returns its old value. After applying WRITEOK, it returns the new value.</p>
+<p>During recovery, a design choice is required:</p>
+<ul>
+<li>allow reads of current local state while writes are paused; or</li>
+<li>pause reads until synchronized.</li>
+</ul>
+<p>The specification emphasizes pausing new writes; it does not clearly demand global read blocking. The implementation/report must state the chosen behavior and its consistency consequence.</p>
+<h2>15. Client uncertainty</h2>
+<p>A client may time out even when its update eventually commits. The provided API reports success or timeout but has no operation-status query.</p>
+<p>This means the system is not providing exactly-once client command semantics across retries. If an application retries after timeout, duplicate suppression needs a stable client request identity. <code>TransactionId</code> could contribute, but only if retry rules preserve it and histories recognize it.</p>
+<p>Do not confuse replica at-most-once application of one update ID with application-level exactly-once requests.</p>
+<h2>16. Current integration matrix</h2>
+<p>Implemented as separate components:</p>
+<ul>
+<li>actor/bootstrap and network infrastructure;</li>
+<li>transaction/message routing;</li>
+<li>client write wrapper;</li>
+<li>branch-local read FSM;</li>
+<li>partial branch-local update FSM;</li>
+<li>heartbeat FSM;</li>
+<li>election FSM and validated snapshot synchronization;</li>
+<li>test/static-analysis infrastructure.</li>
+</ul>
+<p>Not established as one final verified system:</p>
+<ul>
+<li>merged read/update/election receive graph;</li>
+<li>stable update ordering assignment and serialization;</li>
+<li>complete positions/history mutation semantics;</li>
+<li>distinct ACK and duplicate handling;</li>
+<li>update-timeout election/retry;</li>
+<li>history-based recovery of incomplete updates;</li>
+<li>synchronization completion criterion; and</li>
+<li>end-to-end base/regression pass on the final integration commit.</li>
+</ul>
+<h2>17. How to prepare an exam trace</h2>
+<p>For each demonstration, draw five columns:</p>
+<pre><code class="language-text">time | actor mailbox event | local FSM state | replicated state/history | outgoing messages
+</code></pre>
+<p>Mark the crash point exactly. Then explain:</p>
+<ol>
+<li>which invariant is temporarily at risk;</li>
+<li>which timeout or message transfers responsibility;</li>
+<li>why stale events cannot undo the result; and</li>
+<li>what external callback proves progress.</li>
+</ol>
+<p>This method is more reliable than memorizing method names.</p>
+<h2>18. Final study checkpoint</h2>
+<p>Take this scenario: coordinator sent UPDATE to a quorum, sent WRITEOK to one follower, then crashed. Explain why electing any surviving replica by ID alone is insufficient. Your answer should mention observed history, uniform agreement, candidate freshness, idempotent completion, epoch transition, and delaying new writes until recovery.</p>
+<p>The system-wide invariant to remember is: <strong>one ordered update that becomes visible anywhere must remain recoverable and eventually become visible once, in the same order, at every correct replica.</strong></p>
+<h2>19. A student-friendly safety proof outline</h2>
+<pre class="diagram">Safety proof obligations
+  1. one client request -> one parent transaction
+  2. one update -> one ordered EpochPair
+  3. ACK quorum -> one commit decision
+  4. WRITEOK validation -> apply at most once
+  5. recovery -> preserve committed/required history
+  6. client queue -> later read cannot overtake earlier write</pre>
+<p>To argue sequential consistency, pick a sequential order for completed
+operations. Per-client order comes from the request queue. A write’s position
+in the global order comes from its committed <code>EpochPair</code>. A read is placed
+after the writes visible at its target replica. The difficult step is proving
+that recovery never invents a second order for an update that was already
+visible. That proof needs the quorum, history, election, and synchronization
+reports together.</p>
+<h2>20. Corner-case matrix</h2>
+<table><tr><th>Scenario</th><th>Safety question</th><th>Liveness question</th></tr>
+<tr><td>duplicate ACK</td><td>can one sender count twice?</td><td>can a valid quorum still be reached?</td></tr>
+<tr><td>coordinator crash after quorum</td><td>can a partial commit be lost/reordered?</td><td>do survivors elect and synchronize?</td></tr>
+<tr><td>follower crash during WRITEOK</td><td>can it apply twice after restart?</td><td>can the system progress with a majority?</td></tr>
+<tr><td>stale watchdog</td><td>can an old timer start a second election?</td><td>does a genuine silence still trigger one?</td></tr>
+<tr><td>read during recovery</td><td>can it observe an unsafe snapshot?</td><td>when is the replica safe to serve?</td></tr>
+<tr><td>client timeout then retry</td><td>can the write be duplicated?</td><td>is there an idempotency/reconciliation path?</td></tr></table>
+<p>Use this table in an exam answer to avoid discussing only the happy path. For
+each row, name the exact guard or state transition that answers the safety
+question and the message/timeout that answers liveness.</p>
+<h2>21. How to present a trace under time pressure</h2>
+<p>Write columns for actor, event, transaction ID, epoch, and visible state. Mark
+network hops with arrows and local timers with a clock symbol. At every event
+ask: “Could this be stale? Could this sender be wrong? Has the operation already
+completed?” This compact notation exposes most race bugs without reproducing
+the entire Java source.</p>
+<h3>Practice</h3>
+<p>Complete a trace for: client write, two ACKs in a five-replica system,
+coordinator crash, election, synchronization, then client read. Include one
+duplicate ACK and one stale watchdog. State exactly why each is ignored or
+accepted.</p>
+</body>
+</html>

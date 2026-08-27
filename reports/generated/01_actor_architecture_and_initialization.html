@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Actor Architecture and Initialization</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}
+</style>
+</head>
+<body>
+<h1>Actor Architecture and Initialization</h1>
+<blockquote>
+<p><strong>Learning goal.</strong> Understand what an Akka actor owns, how the system is created, and how one incoming message becomes a method call without assuming prior Akka experience.</p>
+</blockquote>
+<p><strong>Main snapshot:</strong> <code>feature/electionTransaction</code> at <code>d1222a2</code>.<br />
+<strong>Key files:</strong> <code>Main.java</code>, <code>AbstractClient.java</code>, <code>Client.java</code>, <code>AbstractReplica.java</code>, <code>Replica.java</code>.</p>
+<h2>1. A useful actor mental model</h2>
+<p>Think of an actor as a worker with a private desk and one inbox.</p>
+<ul>
+<li>Other actors cannot reach onto the desk and change fields.</li>
+<li>They send immutable messages to the inbox.</li>
+<li>The actor removes one message at a time and runs the matching handler.</li>
+<li>While one handler runs, another message for that same actor waits.</li>
+</ul>
+<p>Akka calls the inbox a <strong>mailbox</strong>. <code>ActorRef</code> is the address used to send to that mailbox. The actual <code>Client</code> or <code>Replica</code> Java object is deliberately hidden behind the reference.</p>
+<p>Mailbox serialization is valuable because <code>Replica</code> owns mutable state such as <code>positions</code>, <code>activeTransactions</code>, <code>coordinatorID</code>, and crash status. If only the replica’s own handlers modify those fields, ordinary Java locks are unnecessary inside the actor.</p>
+<p>This guarantee is local to one actor. Replica 1 and replica 2 still execute concurrently, and messages can be delayed relative to one another.</p>
+<h2>2. Class layers</h2>
+<p>The client side has two layers:</p>
+<ul>
+<li><code>AbstractClient</code> is supplied course infrastructure. It defines public request messages, timeout/result callback objects, logging wrappers, and the required <code>sendRead</code>/<code>sendWrite</code> API.</li>
+<li><code>Client</code> implements the project behavior and the transaction queue.</li>
+</ul>
+<p>The replica side follows the same pattern:</p>
+<ul>
+<li><code>AbstractReplica</code> supplies IDs, latency configuration, network channels, initialization/crash messages, callbacks, and the required abstract API.</li>
+<li><code>Replica</code> owns the actual database and protocol transactions.</li>
+</ul>
+<p>This inheritance is not decorative. Automated tests construct <code>Client</code> and <code>Replica</code> through required <code>Props</code> factories, send course-defined messages, and observe the required callbacks. A behavior can be algorithmically correct but still fail the project contract if it bypasses these entry points.</p>
+<h2>3. Creating actors</h2>
+<p><code>Main.main</code> creates an <code>ActorSystem</code>, then creates each replica using <code>system.actorOf(Replica.props(...), name)</code>.</p>
+<p><code>Props</code> is a recipe for constructing actors. It lets Akka control actor creation rather than application code calling <code>new Replica(...)</code> and sharing that Java object.</p>
+<p>The simplified startup flow is:</p>
+<pre><code class="language-text">Main
+  -&gt; create ActorSystem
+  -&gt; create Replica_0 ... Replica_N-1
+  -&gt; build Map&lt;replicaId, ActorRef&gt;
+  -&gt; send InitSystem(group, coordinatorId) to every replica
+  -&gt; create clients and send work
+</code></pre>
+<p>The current <code>Main.java</code> completes replica creation and initialization but leaves client creation and demonstration logic as TODOs. Tests use <code>TestsCommons.createTestSystem</code> instead, so regression tests can still build systems without a complete demo program.</p>
+<h2>4. Why initialization is a message</h2>
+<p><code>InitSystem</code> contains an immutable copy of the replica map and the initial coordinator ID. It is sent to each actor after all <code>ActorRef</code>s exist.</p>
+<p>This solves a construction problem: replica 0 cannot be constructed with references to replica 1 if replica 1 has not been created yet. Two-phase setup avoids that cycle:</p>
+<ol>
+<li>create every actor address;</li>
+<li>distribute the complete address book.</li>
+</ol>
+<p>In <code>Replica.initSystem</code>, the replica stores the group and coordinator, then creates its local <code>HeartbeatTransaction</code>. Every replica derives the same heartbeat transaction ID from the coordinator’s <code>ActorRef</code> and sequence zero. There is one local heartbeat FSM per replica, but the shared ID lets network heartbeat messages route to the corresponding local FSM.</p>
+<h2>5. Receive builders and handlers</h2>
+<p>An actor declares which message classes it accepts through <code>createReceive()</code>.</p>
+<p><code>AbstractClient.createBaseReceiveBuilder()</code> handles public <code>ReadRequest</code> and <code>WriteRequest</code>. <code>Client.createReceive()</code> extends it with protocol results/timeouts, probe messages, and a final fallback dispatcher.</p>
+<p><code>AbstractReplica.createBaseReceiveBuilder()</code> handles crash control and, before initialization, <code>InitSystem</code>. <code>Replica.createReceive()</code> adds special protocol entry messages such as <code>WriteMsg</code>, <code>ElectionMsg</code>, <code>ElectionStartMsg</code>, and <code>SynchronizationMsg</code>, then sends remaining <code>Msg</code> objects to the transaction dispatcher.</p>
+<p>The ordering matters. A new <code>ElectionMsg</code> may need to create or replace a local election transaction before ordinary routing can find it. That is why <code>Replica.onElectionMsg</code> is a top-level handler rather than only another message passed blindly to <code>onMessage</code>.</p>
+<h2>6. State ownership</h2>
+<p>The main ownership boundaries are:</p>
+<ul>
+<li>A <code>Client</code> owns its transaction counter, one current transaction, and a queue of later transactions.</li>
+<li>A <code>Replica</code> owns its positions, coordinator view, epoch view, crash state, network-channel map inherited from <code>AbstractReplica</code>, and active transactions.</li>
+<li>A <code>Transaction</code> object is owned by exactly one client or replica actor. It is not itself an Akka actor.</li>
+<li>A <code>NetworkChannel</code> actor owns one FIFO queue for traffic from one replica to one destination.</li>
+</ul>
+<p>Transaction objects are safe only because their owner calls them from its serialized mailbox. Passing a mutable transaction object to another actor would break this design.</p>
+<h2>7. Client serialization versus replica concurrency</h2>
+<p><code>Client.scheduleTransaction</code> permits only one current transaction. Later client operations wait in <code>scheduledTransactions</code>. When the current transaction calls <code>onTransactionComplete</code>, the client polls and starts the next one.</p>
+<p><code>Replica.scheduleTransaction</code> behaves differently: it adds every transaction to <code>activeTransactions</code> and starts it immediately. A replica may therefore participate in heartbeat, election, and update conversations at the same time.</p>
+<p>This difference is intentional:</p>
+<ul>
+<li>Client serialization helps preserve that client’s operation order.</li>
+<li>Replica concurrency is required because background liveness monitoring must continue while application work exists.</li>
+</ul>
+<p>It also makes correct message correlation essential. The replica must not deliver a message to the wrong active transaction.</p>
+<h2>8. Crash behavior at the actor boundary</h2>
+<p>A simulated crash does not terminate the Akka actor. Instead, <code>Replica</code> enters a <code>CRASHED</code> mode and ignores protocol activity. Keeping the actor alive lets the test harness send deterministic crash instructions and observe callbacks without relying on Akka supervision or actor restart behavior.</p>
+<p>This is a model of crash-stop failure, not a real process crash. The educational question is whether the actor behaves externally like a dead replica: no useful incoming processing and no outgoing protocol traffic.</p>
+<h2>9. Course callbacks as observable outputs</h2>
+<p>Tests do not inspect private fields directly. They pass a TestKit listener into <code>propsWithListener</code> and expect callbacks such as:</p>
+<ul>
+<li><code>callbackOnReadResult</code></li>
+<li><code>callbackOnWriteTimeout</code></li>
+<li><code>callbackOnUpdateApplied</code></li>
+<li><code>callbackOnElectionStarted</code></li>
+<li><code>callbackOnCoordinatorElected</code></li>
+</ul>
+<p>The callbacks convert internal behavior into messages the test probe can observe. Treat them like required output ports of the architecture.</p>
+<h2>10. Implementation status and limitations</h2>
+<ul>
+<li>Actor creation, initialization, transaction hosting, and listener plumbing exist.</li>
+<li><code>Main</code> is not a complete executable demonstration.</li>
+<li>The current branch does not contain integrated read or update protocol classes.</li>
+<li>The receive graph changes across feature branches, so a final merged branch must be re-documented and retested.</li>
+<li>Akka guarantees per-actor mailbox processing, but the project must still reason about delays between different actors.</li>
+</ul>
+<h2>11. Exam rehearsal</h2>
+<p><strong>Why are transactions ordinary objects instead of actors?</strong> They are small FSMs hosted by a client or replica. The owner actor already provides mailbox serialization and a sender identity, so making every transaction a second actor would add lifecycle and routing complexity.</p>
+<p><strong>Why does each replica receive <code>InitSystem</code>?</strong> It needs a complete immutable membership map and the coordinator identity to route messages, construct the ring, and start the correct heartbeat role.</p>
+<p><strong>What prevents two handlers from modifying one replica simultaneously?</strong> Akka processes one mailbox message at a time for that actor. This does not prevent other replicas from running concurrently.</p>
+<h2>12. Read the startup path as a story</h2>
+<pre class="diagram">Main.main
+   |
+   +--> ActorSystem
+   +--> create Client actor
+   +--> create one Replica actor per configured id
+                 |
+                 +--> InitSystem(membership, coordinator)
+                         |
+                         +--> install positions/history
+                         +--> create local protocol FSMs
+                         +--> start heartbeat role</pre>
+<p>The important learning point is that constructors should create an object,
+while <code>InitSystem</code> supplies information that is only known after the whole
+actor graph exists. Passing the complete membership map in one initialization
+message avoids a half-built replica that knows about itself but not its
+neighbors. It also gives every replica the same coordinator reference and the
+same starting epoch assumptions.</p>
+<h2>13. Code microscope: mailbox code versus protocol code</h2>
+<p>In a <code>createReceive()</code> builder, a line such as
+<code>match(InitSystem.class, this::onInitSystem)</code> is a type dispatch rule. Akka
+does not call <code>onInitSystem</code> at construction time; it calls it later when an
+<code>InitSystem</code> object reaches the mailbox. This explains three details students
+often mix up:</p>
+<ol>
+<li>Fields may still have default values when the actor constructor returns.</li>
+<li>The handler can safely create transaction objects because it now owns the
+actor-thread state.</li>
+<li>A message sent before initialization can be queued, so handlers need an
+explicit “initialized?” policy rather than assuming startup is instantaneous.</li>
+</ol>
+<p>The same distinction applies to a transaction FSM. <code>Transaction.onMessage</code>
+is ordinary Java method dispatch, but the call is made by the owning actor’s
+mailbox handler. The actor gives the FSM serialization; the FSM gives the
+actor protocol state. Neither layer alone is the complete behavior.</p>
+<pre class="code-microscope">// Conceptual shape, simplified for study
+if (message instanceof InitSystem) {
+    this.system = ((InitSystem) message).system();  // immutable context
+    this.heartbeat = new HeartbeatTransaction(...); // actor-local object
+    this.heartbeat.start();                         // schedules local work
+}
+// Later mailbox turns route protocol messages by transaction id.
+if (active.id().equals(message.transactionId())) {
+    active.onMessage(message);
+}</pre>
+<p>The equality check is a routing guard, not a consistency decision. A matching
+ID only says “this message belongs to this conversation”; the FSM must still
+check its current state, sender, epoch, and payload before mutating data.</p>
+<h2>14. Lifecycle and failure thought experiment</h2>
+<p>Imagine a follower receives an election message while its initialization is
+still queued. If the implementation silently drops that election, liveness may
+be lost. If it processes the election with an empty membership map, it may
+send to the wrong neighbor. A robust design either orders initialization before
+protocol traffic in the test harness or makes the uninitialized behavior
+explicit and observable. Use this thought experiment when reading every
+special entry message (<code>InitSystem</code>, crash events, and client requests).</p>
+<h3>Practice</h3>
+<p>Sketch the fields that belong to the actor (mailbox-owned mutable state) and
+the fields that belong to a transaction (protocol-local state). Then explain
+why sharing one mutable transaction object between two replica actors would
+break the actor model even if Java allowed the reference to be passed.</p>
+</body>
+</html>

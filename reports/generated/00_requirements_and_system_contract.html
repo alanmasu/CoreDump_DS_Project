@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Requirements and System Contract</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}
+</style>
+</head>
+<body>
+<h1>Requirements and System Contract</h1>
+<blockquote>
+<p><strong>Purpose.</strong> This report explains what the system is supposed to achieve before discussing how the Java classes attempt to achieve it. It is a study report, not the final exam report.</p>
+</blockquote>
+<p><strong>Primary source:</strong> <code>specs/ds1_project_2026_v1.pdf</code>, dated June 2026.<br />
+<strong>Repository snapshot inspected:</strong> <code>feature/electionTransaction</code>, commit <code>d1222a2</code>.<br />
+<strong>Important status note:</strong> the working repository is split across feature branches. A requirement described here is not automatically an implemented feature.</p>
+<h2>1. The problem in everyday language</h2>
+<p>Imagine several offices, each holding a copy of the same array of integers. Each array index represents one person and the integer at that index represents that person’s position. A client may ask any office to read a value or change a value.</p>
+<p>Reading is simple: the contacted replica returns its local value immediately. Writing is harder. If two replicas apply changes in different orders, their arrays can diverge. The project therefore appoints one replica as <strong>coordinator</strong>. All writes pass through that coordinator, which orders updates and distributes them.</p>
+<p>The coordinator may crash. The remaining replicas must notice, choose a replacement, recover any work that the old coordinator left half-finished, and only then accept new writes.</p>
+<p>The system is therefore built around two large algorithms:</p>
+<ol>
+<li>a two-phase, quorum-based update broadcast; and</li>
+<li>a ring-based coordinator election followed by synchronization.</li>
+</ol>
+<h2>2. Actors and data</h2>
+<p>There are two kinds of application actors:</p>
+<ul>
+<li>A <strong>client</strong> asks for reads and writes. It does not store the database.</li>
+<li>A <strong>replica</strong> stores a fixed-length <code>positions[]</code> array. One replica is also the coordinator.</li>
+</ul>
+<p>Membership is static. Every replica receives the complete map from numeric replica IDs to Akka <code>ActorRef</code>s during initialization. No replica joins later, and a crashed replica never recovers.</p>
+<p>The specification assumes that a strict majority of replicas remains correct. For <code>N</code> replicas, the quorum size is:</p>
+<pre><code class="language-text">Q = floor(N / 2) + 1
+</code></pre>
+<p>For five replicas, <code>Q = 3</code>. The coordinator counts as one of those three.</p>
+<h2>3. Read contract</h2>
+<p>A read request contains an array index and the client’s actor reference. The contacted replica reads its own <code>positions[index]</code> and replies immediately. It does not ask the coordinator or a quorum.</p>
+<p>This design provides <strong>sequential consistency from one replica’s point of view</strong>: operations sent by one client to one replica are observed in the order sent. It does not promise that a client switching arbitrarily between replicas always sees the newest real-time value.</p>
+<p>The distinction matters in an exam. A local read is fast, but a replica that has not yet received a committed update can temporarily return an older value.</p>
+<h2>4. Write and update contract</h2>
+<p>A write request contains <code>(index, value)</code>. The contacted replica forwards the work to the current coordinator. The coordinator then performs the update protocol:</p>
+<ol>
+<li>Choose a unique update order key <code>⟨epoch, sequence⟩</code>.</li>
+<li>Broadcast <code>UPDATE(index, value, epochPair)</code>.</li>
+<li>Each receiving replica records the update and returns <code>ACK</code>.</li>
+<li>The coordinator waits for a strict majority, including itself.</li>
+<li>The coordinator broadcasts <code>WRITEOK</code>.</li>
+<li>A replica applies the change to <code>positions[]</code> only after <code>WRITEOK</code>.</li>
+</ol>
+<p>The epoch identifies a coordinator term. The sequence number identifies the order within that term. Epochs increase when the coordinator changes; the sequence returns to zero at the start of the new epoch.</p>
+<p>For example:</p>
+<pre><code class="language-text">&lt;2, 7&gt; comes before &lt;2, 8&gt;
+&lt;2, 100&gt; comes before &lt;3, 0&gt;
+</code></pre>
+<p><code>TransactionId</code> and <code>EpochPair</code> are not interchangeable. A transaction ID routes one local or distributed conversation. An epoch pair gives a replicated update its total-order position.</p>
+<h2>5. Reliable total-order broadcast properties</h2>
+<p>The specification describes four properties. Translate them into questions:</p>
+<ul>
+<li><strong>Validity:</strong> if a correct sender broadcasts an update, will it eventually be delivered?</li>
+<li><strong>Integrity:</strong> can a replica apply the same update twice, or apply an update that was never sent?</li>
+<li><strong>Uniform agreement:</strong> if any replica applies an update, will every correct replica eventually apply it?</li>
+<li><strong>Total order:</strong> if one correct replica applies <code>A</code> before <code>B</code>, do all correct replicas apply <code>A</code> before <code>B</code>?</li>
+</ul>
+<p>Uniform agreement includes replicas that later crash. Suppose replica 2 applies update <code>U</code> and is then destroyed. The value must not disappear from all surviving histories. Recovery after coordinator failure exists largely to protect this property.</p>
+<h2>6. Failure detection contract</h2>
+<p>The project specifies three ways to suspect the coordinator:</p>
+<ol>
+<li>A replica forwards a write but never receives the coordinator’s <code>UPDATE</code>.</li>
+<li>A replica receives <code>UPDATE</code> but never receives <code>WRITEOK</code>.</li>
+<li>No write is active, but periodic <code>HEARTBEAT</code>s stop arriving.</li>
+</ol>
+<p>These mechanisms detect different silences and should not be collapsed into one timer. Failure detection is assumed accurate: reasonable timeout values must not create false elections under the configured network delay.</p>
+<h2>7. Election and recovery contract</h2>
+<p>Replica IDs define a logical ring. An <code>ELECTION</code> message circulates through available replicas. Each participant adds its freshest observed update information. A sender waits for an ACK; if the next replica crashes, timeout handling skips it.</p>
+<p>The best candidate is the replica that knows the most recent update. Numeric replica ID breaks a tie. After a winner is found, the new coordinator must:</p>
+<ol>
+<li>announce itself with <code>SYNCHRONIZATION</code>;</li>
+<li>establish a newer epoch;</li>
+<li>recover missing or incomplete updates;</li>
+<li>bring correct replicas to a common state;</li>
+<li>restart failure detection for the new term; and</li>
+<li>only then resume new writes.</li>
+</ol>
+<p>Choosing a leader and recovering replicated state are separate responsibilities. A correct election can still produce an incorrect system if synchronization loses an incomplete update.</p>
+<h2>8. Environmental assumptions versus implementation duties</h2>
+<p>The environment promises:</p>
+<ul>
+<li>reliable FIFO communication channels;</li>
+<li>static membership;</li>
+<li>crash-stop failures;</li>
+<li>no false failure detections; and</li>
+<li>a surviving strict majority.</li>
+</ul>
+<p>The implementation must still provide:</p>
+<ul>
+<li>per-channel FIFO delay emulation;</li>
+<li>actor encapsulation and immutable shared message data;</li>
+<li>update ordering and duplicate prevention;</li>
+<li>client timeouts and protocol timeouts;</li>
+<li>deterministic crash injection for tests;</li>
+<li>election termination despite crashed ring neighbors;</li>
+<li>recovery of interrupted work;</li>
+<li>mandatory callbacks; and</li>
+<li>timestamped logs through the supplied <code>Logger</code>.</li>
+</ul>
+<p>An assumption is not a feature. For example, “channels are reliable” means messages are not lost by the model; it does not remove the need to route replica traffic through <code>NetworkChannel</code> so FIFO delay behavior is preserved.</p>
+<h2>9. Current implementation map</h2>
+<p>At the inspected snapshot:</p>
+<ul>
+<li><code>origin/main</code> at <code>84846dc</code> contains transaction infrastructure and heartbeat behavior.</li>
+<li><code>origin/feat/readTransaction</code> at <code>1ed58b6</code> contains the read FSM.</li>
+<li><code>origin/feat/WriteTransaction</code> at <code>8c42a18</code> contains the client/contact-replica write wrapper.</li>
+<li><code>origin/feat/UpdateTransaction</code> at <code>59bbe80</code> contains a partial UPDATE/ACK/WRITEOK implementation.</li>
+<li><code>feature/electionTransaction</code> at <code>d1222a2</code> contains election and snapshot synchronization.</li>
+</ul>
+<p>These branches are not one verified final system. In particular, timeout-driven update recovery and history replay are incomplete, and the current election synchronization copies a position snapshot rather than replaying every missing update.</p>
+<h2>10. Study checklist</h2>
+<p>You should be able to answer these without looking at the code:</p>
+<ol>
+<li>Why can a read be local while a write requires coordination?</li>
+<li>Why is a strict-majority ACK useful?</li>
+<li>What is the difference between <code>TransactionId</code> and <code>EpochPair</code>?</li>
+<li>Why are heartbeat timeout and WRITEOK timeout separate?</li>
+<li>Why is election incomplete until synchronization finishes?</li>
+</ol>
+<p>The central invariant to remember is: <strong>once an update is applied anywhere, recovery must ensure that every correct replica eventually applies that update in the same relative order.</strong></p>
+<h2>11. A visual map from requirement to mechanism</h2>
+<pre class="diagram">client request
+      |
+      v
+client transaction ---- local read ----> replica.positions[index]
+      |
+      +---- write ----> coordinator ---- UPDATE/ACK ----> quorum
+                                      |
+                                      +---- WRITEOK ----> all replicas
+                                                         |
+                                                         v
+                                                  history + positions
+
+heartbeat notices silence -> election ring -> freshest candidate -> snapshot sync
+                                                                 -> new term -> normal traffic</pre>
+<p>This map is useful because a requirement is not implemented by one class. A
+write requirement crosses the client queue, a parent write transaction, a
+replica update transaction, <code>NetworkChannel</code>, quorum bookkeeping, and the
+state/history layer. Likewise, “the coordinator can fail” is not only a crash
+test: heartbeat must notice it, election must choose a replacement, and
+recovery must make the replacement safe before new writes are accepted.</p>
+<div class="callout"><div class="callout-title">Student tip: separate safety from liveness</div>Safety asks “can a bad result ever be produced?” (for example, two values at the same index in one committed order). Liveness asks “does a correct operation eventually finish?” (for example, a surviving client eventually receives a callback). A timeout may preserve safety while sacrificing liveness; a protocol that applies an uncommitted value may violate safety even if it is fast.</div>
+<h2>12. Code microscope: translating a contract into a review question</h2>
+<p>When reading a method, write the requirement in plain English first and then
+look for the exact state transition that enforces it. For example, the
+sequential-read contract can be decomposed as follows:</p>
+<table><tr><th>Contract sentence</th><th>Concrete question to ask in code</th></tr>
+<tr><td>A read observes the replica's current value</td><td>Does the handler read <code>positions[index]</code> at handling time, rather than from a cached request?</td></tr>
+<tr><td>Requests from one client keep their order</td><td>Is a second request queued until the first transaction reaches a terminal state?</td></tr>
+<tr><td>Every request has one result</td><td>Do success, timeout, and crash paths all clear the same active transaction exactly once?</td></tr>
+<tr><td>A write becomes visible in one order</td><td>Is the same ordered <code>EpochPair</code> recorded before each replica applies the WRITEOK?</td></tr></table>
+<p>This technique prevents a common exam mistake: pointing at a class name and
+calling it “the implementation.” The implementation is the chain of guards,
+messages, and state mutations that makes the sentence true.</p>
+<h2>13. Worked timeline: why the requirements compose</h2>
+<p>Suppose client C writes <code>x=7</code>, then immediately reads <code>x</code>. The write first
+needs a commit decision. The client therefore remains in its write transaction
+until the parent receives completion. Only then does the request manager start
+the read transaction. The read is local, so it can return immediately from the
+selected replica. If the write were allowed to complete its callback before
+WRITEOK was installed, the read could legally hit a replica that still stores
+the old value. The client-level queue is therefore part of the consistency
+argument, not just a convenience for tidier code.</p>
+<p>For revision practice, draw the same timeline with a coordinator crash between
+ACK and WRITEOK. Mark which facts are known (quorum evidence, candidate
+history, visible positions) and which are unknown (whether every replica saw
+the commit). That distinction is the bridge from the requirements report to
+the election and recovery reports.</p>
+<h2>14. Questions to test your understanding</h2>
+<ol>
+<li>Which requirement is enforced locally by an actor mailbox, and which one
+requires a protocol across replicas?</li>
+<li>Why can a client timeout be truthful without proving that the distributed
+write was rolled back?</li>
+<li>If two updates receive different sequence numbers, which subsystem should
+reject or repair the disagreement?</li>
+<li>Which safety property would be threatened if a follower applied UPDATE
+before receiving WRITEOK?</li>
+</ol>
+</body>
+</html>

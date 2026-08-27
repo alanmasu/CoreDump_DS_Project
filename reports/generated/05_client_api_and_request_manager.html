@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Client API and Request Manager</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}
+</style>
+</head>
+<body>
+<h1>Client API and Request Manager</h1>
+<blockquote>
+<p><strong>Learning goal.</strong> Follow a request from the public course API into a client transaction, understand why clients queue operations, and see how callbacks and timeouts turn internal events into observable results.</p>
+</blockquote>
+<p><strong>Base/current snapshot:</strong> <code>feature/electionTransaction</code> at <code>d1222a2</code>.<br />
+<strong>Read implementation reference:</strong> <code>origin/feat/readTransaction</code> at <code>1ed58b6</code>.<br />
+<strong>Write implementation reference:</strong> <code>origin/feat/UpdateTransaction</code> at <code>59bbe80</code>.</p>
+<h2>1. The client has two audiences</h2>
+<p><code>Client</code> serves both application callers and protocol code.</p>
+<p>Application callers use course-defined messages:</p>
+<ul>
+<li><code>ReadRequest(index, optionalReplica)</code></li>
+<li><code>WriteRequest(index, value, optionalReplica)</code></li>
+</ul>
+<p>Protocol code uses transaction messages:</p>
+<ul>
+<li>read request/result/timeout messages;</li>
+<li>write request/result/timeout messages; and</li>
+<li>probe messages used by tests.</li>
+</ul>
+<p><code>AbstractClient</code> is the adapter between these worlds. It receives the public request and calls the abstract <code>sendRead</code> or <code>sendWrite</code> method implemented by <code>Client</code>.</p>
+<h2>2. Target selection</h2>
+<p>A request may name a replica directly. If it does not, <code>AbstractClient</code> uses <code>defaultTargetReplica</code>, supplied when the client actor is created.</p>
+<p>Selection logic is:</p>
+<pre><code class="language-text">if request.replica exists:
+    use it
+else if client.defaultTargetReplica exists:
+    use it
+else:
+    throw because no target exists
+</code></pre>
+<p>This lets tests build a client permanently associated with one replica while still allowing an individual request to override the target.</p>
+<p>The default target is an <code>Optional&lt;ActorRef&gt;</code>, but request fields use null to mean absent. Students should recognize this as mixed null/Optional style inherited from the API rather than a distributed-systems concept.</p>
+<h2>3. Creating a client transaction</h2>
+<p><code>Client.getNextTransactionId</code> combines the client’s own <code>ActorRef</code> with a monotonically increasing local counter. The first request is <code>&lt;client,0&gt;</code>, the next <code>&lt;client,1&gt;</code>, and so on.</p>
+<p><code>sendRead</code> constructs <code>ReadTransaction</code>; <code>sendWrite</code> constructs <code>WriteTransaction</code>. The transaction stores request-specific fields and the chosen destination, then enters the client’s scheduler.</p>
+<p>The current election branch still has <code>sendRead</code> as TODO. The read feature branch implements it. The write path is present on the current branch but only becomes end-to-end meaningful when the update branch behavior is integrated.</p>
+<h2>4. Why the client serializes transactions</h2>
+<p>The client keeps one <code>currentTransaction</code> and a FIFO <code>scheduledTransactions</code> queue.</p>
+<p>Suppose the application quickly submits:</p>
+<pre><code class="language-text">write(0, 10)
+write(0, 20)
+read(0)
+</code></pre>
+<p>The client starts the first write and queues the other two. Completion starts the next. This preserves the order in which that client exposes operations to its chosen replica and avoids one result being matched against another request.</p>
+<p>This queue does not globally serialize all clients. Client A and client B can still submit concurrent writes. The coordinator/update protocol must impose their global order.</p>
+<h2>5. Sending from the client</h2>
+<p><code>Client.unicast</code> calls <code>target.tell(msg, getSelf())</code> directly. Unlike replica-to-replica sends, it does not use <code>NetworkChannel</code>.</p>
+<p>That means the simulated FIFO latency infrastructure primarily controls replica traffic. Client timeout values are still configurable and tests can crash the destination so no result returns. A report or exam answer should describe the implemented path exactly rather than claiming every message in the system crosses <code>NetworkChannel</code>.</p>
+<h2>6. Receiving and correlating results</h2>
+<p>The client’s receive builder recognizes write results/timeouts explicitly on the current branch and sends them to <code>onMessage</code>. The read branch relies on the fallback <code>Msg</code> dispatcher for read messages.</p>
+<p><code>onMessage</code> checks:</p>
+<pre><code class="language-text">currentTransaction != null
+AND currentTransaction.id == message.transactionId
+</code></pre>
+<p>If both hold, it calls <code>computeState</code>. Otherwise, the message is discarded as inactive or foreign.</p>
+<p>This protects against a delayed result from transaction 3 arriving while transaction 4 is current. The check does not validate the result sender or payload; those validations belong to the transaction if required.</p>
+<h2>7. Timeout lifecycle</h2>
+<p>A read or write transaction schedules a timeout message to the client itself after sending the request.</p>
+<p>On success:</p>
+<ol>
+<li>cancel the timeout if possible;</li>
+<li>invoke the success callback;</li>
+<li>mark the transaction done; and</li>
+<li>release the next queued transaction.</li>
+</ol>
+<p>On timeout:</p>
+<ol>
+<li>invoke the timeout callback with client, replica, index, and possibly value;</li>
+<li>mark the transaction timed out; and</li>
+<li>release the queue.</li>
+</ol>
+<p>A timeout is a client-local observation: “I did not receive a result before my deadline.” It does not prove whether the distributed update committed elsewhere.</p>
+<h2>8. Callbacks are part of the API</h2>
+<p>The mandatory callbacks log and forward an event to an optional test listener:</p>
+<ul>
+<li><code>callbackOnReadResult(ReadResult)</code></li>
+<li><code>callbackOnWriteResult(WriteResult)</code></li>
+<li><code>callbackOnReadTimeout(ReadTimeout)</code></li>
+<li><code>callbackOnWriteTimeout(WriteTimeout)</code></li>
+</ul>
+<p>The callback objects include enough data for tests to associate the outcome with its request and target. They are not protocol messages exchanged with replicas.</p>
+<p>The static <code>callbackContract</code> check only proves that compiled code calls each callback somewhere. Runtime tests are still needed to prove it is called at the correct time with correct data.</p>
+<h2>9. Request/result layering</h2>
+<p>It helps to name the layers explicitly:</p>
+<pre><code class="language-text">Public request:    AbstractClient.WriteRequest
+Wire request:      WriteTransaction.WriteMsg
+Wire result:       WriteTransaction.WriteResultMsg
+Public callback:   AbstractClient.WriteResult
+</code></pre>
+<p>The public classes are stable test/API objects. The wire classes carry transaction metadata. The transaction converts between them.</p>
+<h2>10. Failure cases</h2>
+<ul>
+<li><strong>No target:</strong> request handler throws before creating a transaction.</li>
+<li><strong>Destination crashed:</strong> it ignores the request; client timeout eventually fires.</li>
+<li><strong>Late success after timeout:</strong> after queue advancement, its old ID is foreign and is discarded.</li>
+<li><strong>Wrong ID:</strong> discarded by <code>Client.onMessage</code>.</li>
+<li><strong>Unexpected message with correct ID:</strong> the transaction may throw, depending on its FSM implementation.</li>
+<li><strong>Client actor failure:</strong> not modeled by the project specification.</li>
+</ul>
+<h2>11. What current tests prove</h2>
+<p><code>TestDispatcher</code> checks idle and foreign-message dropping. Read and write regression tests check success/timeout callback shapes. Write tests on the standalone write branch manually inject <code>WriteFinishMsg</code>, so they prove the wrapper, not a real quorum update.</p>
+<p>The base tests are more demanding: repeated operations, different targets, crashes, and callback timing. At the current split-branch state, they cannot be treated as an integrated pass.</p>
+<h2>12. Exam rehearsal</h2>
+<p><strong>Why queue client requests?</strong> To preserve that client’s request order and keep one unambiguous active result/timeout context.</p>
+<p><strong>Does a write timeout mean the write definitely failed?</strong> No. It means the client did not observe completion by its deadline; distributed work might have partially or fully progressed.</p>
+<p>The invariant to remember is: <strong>a client reports an outcome only for its current transaction ID, then advances its FIFO request queue exactly once.</strong></p>
+<h2>13. The client as a small, sequential machine</h2>
+<pre class="diagram">application call
+      |
+      v
+request queue: [R1, R2, R3]
+      |
+      +--> start R1 + remember active TransactionId
+                       |
+              result or timeout callback
+                       |
+                       v
+                 remove R1 exactly once
+                       |
+                       +--> start R2</pre>
+<p>The queue is not merely a performance detail. If R2 is a read that follows a
+write R1, starting both at once could let the read observe the old value. A
+single active request gives the client a clear session order even though many
+replicas are running concurrently.</p>
+<h2>14. Code microscope: callback and timeout ownership</h2>
+<p>When reading a client handler, identify four operations and their order:</p>
+<ol>
+<li>verify the callback’s <code>TransactionId</code> equals the active request;</li>
+<li>cancel or invalidate the request’s timer;</li>
+<li>invoke the application callback with the result or timeout;</li>
+<li>dequeue the request and start the next one.</li>
+</ol>
+<p>If step 1 is missing, a late result from an older request can complete the
+new request. If step 4 is performed in both a success handler and a timeout
+handler without an idempotence guard, one request can dequeue two entries.</p>
+<pre class="code-microscope">// Conceptual client completion
+if (!activeId.equals(msg.transactionId())) return; // stale callback
+activeTimer.cancel();
+callback.onResult(msg.value());
+activeId = null;
+startNextQueuedRequest();
+</pre>
+<p>The real code may use a callback message instead of a direct method call, but
+the ownership questions stay the same: which actor owns the queue, who creates
+the timer, and which path clears the active slot?</p>
+<h2>15. Timeout is an uncertainty result</h2>
+<p>Suppose the client times out after sending a write. The coordinator may have
+already collected a majority and crashed before the result returned. Reporting
+“timeout” is honest about client knowledge; it is not a rollback command. A
+user interface should therefore avoid silently retrying a non-idempotent write
+unless the protocol supplies an operation ID and duplicate detection. This is
+also why the reports distinguish a client-visible outcome from replicated
+commit state.</p>
+<h3>Practice</h3>
+<p>Write a three-row trace for <code>write(5)</code>, <code>read()</code>, and a late write result. Mark
+the active ID at every row and explain which message must be ignored. Then
+design a test that proves the queue advances once when success and timeout are
+delivered in either order.</p>
+</body>
+</html>

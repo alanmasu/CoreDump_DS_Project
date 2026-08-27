@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ring Election Protocol</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}
+</style>
+</head>
+<body>
+<h1>Ring Election Protocol</h1>
+<blockquote>
+<p><strong>Learning goal.</strong> Follow the election token around an ID-ordered ring, understand candidate selection and ACK timeouts, and see how the code suppresses competing elections.</p>
+</blockquote>
+<p><strong>Implementation inspected:</strong> <code>feature/electionTransaction</code> at <code>d1222a2</code>.<br />
+<strong>Key files:</strong> <code>ElectionTransaction.java</code>, election sections of <code>Replica.java</code>, <code>TestElectionTransaction.java</code>, election diagrams.</p>
+<h2>1. What election must decide</h2>
+<p>After coordinator failure, replicas must choose one new coordinator. This is not simply “highest replica ID wins.” The winner should be the surviving replica with the freshest observed update so it has the best recovery knowledge. Replica ID breaks equal-freshness ties.</p>
+<p>The logical ring sorts numeric replica IDs. Physical actor creation order or map iteration order does not define the ring.</p>
+<h2>2. Candidate ordering</h2>
+<p><code>ElectionCandidate</code> contains:</p>
+<ul>
+<li>numeric replica ID;</li>
+<li>whether it has observed any update; and</li>
+<li>latest observed <code>EpochPair</code> when present.</li>
+</ul>
+<p>Comparison rules, from strongest to weakest, are:</p>
+<ol>
+<li>a candidate with real observed-update information beats one with none;</li>
+<li>newer epoch pair beats older;</li>
+<li>higher replica ID breaks a tie.</li>
+</ol>
+<p>Examples:</p>
+<pre><code class="language-text">R2 at &lt;3,9&gt; beats R4 at &lt;3,8&gt;
+R4 at &lt;3,9&gt; beats R2 at &lt;3,9&gt;
+R1 with &lt;0,0&gt; beats R5 with no observed update
+</code></pre>
+<p>The candidate list is copied into <code>ElectionMsg</code>, preventing mutation while the token is in flight.</p>
+<h2>3. Message vocabulary</h2>
+<ul>
+<li><code>ElectionStartMsg</code>: local delayed trigger after failure detection.</li>
+<li><code>ElectionMsg</code>: network token carrying failed coordinator ID and candidates.</li>
+<li><code>ElectionAckMsg</code>: confirms the next replica received/forwarded the token.</li>
+<li><code>ElectionAckTimeoutMsg</code>: local attempt timeout with expected target and version.</li>
+<li><code>ElectionRejectMsg</code>: tells a losing competing initiator to cancel.</li>
+<li><code>SynchronizationMsg</code>: leadership/recovery announcement, covered mainly in the recovery report.</li>
+</ul>
+<h2>4. Local FSM states</h2>
+<pre><code class="language-text">NEW -&gt; PARTICIPATING -&gt; ELECTED -&gt; SYNCHRONIZING -&gt; DONE
+                   \------------------------------&gt; DONE on rejection/failure
+</code></pre>
+<p><code>PARTICIPATING</code> covers both an initiator and a replica that joined an incoming token. <code>ELECTED</code> means this local candidate won. <code>SYNCHRONIZING</code> acknowledges that leadership is not operational until recovery work is initiated.</p>
+<h2>5. Staggered election start</h2>
+<p>Every follower can notice the same failed coordinator. Starting all tokens simultaneously would create unnecessary competition.</p>
+<p><code>Replica.startElection</code> calculates ring distance from the failed coordinator and schedules start after:</p>
+<pre><code class="language-text">ringDistance * maxLatencyPlusTolerance
+</code></pre>
+<p>The closest successor starts first. Sets prevent repeated scheduling, repeated participation, or restarting an already completed failure term.</p>
+<p>Staggering reduces competition; it does not eliminate it. The code still defines deterministic competition resolution.</p>
+<h2>6. Healthy-ring trace</h2>
+<p>Suppose R1 failed and ring survivors are R2, R3, R4.</p>
+<ol>
+<li>R2 begins first, creates a negative-sequence election transaction ID, and places its local candidate in the token.</li>
+<li>R2 sends token to R3 and schedules ACK timeout for that target/attempt.</li>
+<li>R3 adds its candidate, forwards to R4, then ACKs R2.</li>
+<li>R4 adds its candidate, forwards to R2, then ACKs R3.</li>
+<li>R2 sees its own candidate already present: the collection phase completed a ring.</li>
+<li>It computes the best candidate.</li>
+<li>If R2 is winner, it ACKs previous sender and starts winner completion. Otherwise, it sends the full candidate list directly toward the winner.</li>
+<li>The winner recognizes itself and starts synchronization.</li>
+</ol>
+<p>Forward-before-ACK ensures that receiving an ACK means the next participant accepted responsibility for continuing the token.</p>
+<h2>7. Skipping a crashed neighbor</h2>
+<p>When a sender forwards, it stores:</p>
+<ul>
+<li>pending target ID;</li>
+<li>pending message;</li>
+<li>incremented attempt version; and</li>
+<li>timeout message containing target/version.</li>
+</ul>
+<p>If the expected ACK does not arrive:</p>
+<ol>
+<li>reject stale timeout if target/version no longer match;</li>
+<li>mark the target unavailable;</li>
+<li>remove that target’s candidate evidence from the pending list;</li>
+<li>choose the next available ring ID; and</li>
+<li>resend with a new attempt version.</li>
+</ol>
+<p>Removing a crashed candidate matters. Otherwise a dead but freshest candidate could be elected forever.</p>
+<h2>8. ACK validation</h2>
+<p>An ACK is accepted only if there is a pending message and its sender maps to the current pending target. Valid ACK cancels the timer and clears pending state.</p>
+<p>The attempt version protects against this race:</p>
+<pre><code class="language-text">attempt 4 to R3 times out
+attempt 5 starts toward R4
+old timeout or late event from attempt 4 arrives
+</code></pre>
+<p>Only attempt 5 may affect current forwarding.</p>
+<h2>9. Competing elections</h2>
+<p><code>Replica</code> tracks the current election transaction ID per failed coordinator. If another token arrives, it compares initiators:</p>
+<ul>
+<li>lower numeric initiator ID is preferred;</li>
+<li>for the same initiator, lower election sequence number is preferred.</li>
+</ul>
+<p>Election IDs use negative sequence numbers, separated from ordinary non-negative replica transactions and heartbeat sequence zero.</p>
+<p>The preferred incoming election replaces the current transaction. A non-preferred token is rejected. An initiator receiving <code>ElectionRejectMsg</code> completes and unregisters its losing FSM.</p>
+<h2>10. Input validation</h2>
+<p>Before creating/routing a token, <code>Replica.isValidElectionMessage</code> rejects:</p>
+<ul>
+<li>null transaction/sender/initiator;</li>
+<li>senders or initiators outside membership;</li>
+<li>unknown failed coordinator;</li>
+<li>the failed coordinator trying to participate locally;</li>
+<li>candidates outside membership;</li>
+<li>the failed coordinator in candidates; and</li>
+<li>duplicate candidate IDs.</li>
+</ul>
+<p>Validating before routing prevents malformed messages from poisoning transaction maps or causing null dereferences.</p>
+<h2>11. Termination reasoning</h2>
+<p>The ring contains a finite static set. Each failed forwarding target is added to <code>unavailableReplicaIds</code>, so a local attempt does not retry the same dead target forever. A strict majority survives, so at least one candidate should remain.</p>
+<p>The branch also removes a selected winner if it cannot be contacted and recomputes from remaining candidates. This addresses the case where the best candidate crashes after token collection.</p>
+<p>End-to-end termination still depends on timeout accuracy, valid membership, and integration with heartbeat/crash behavior.</p>
+<h2>12. Current scope limitations</h2>
+<ul>
+<li>Candidate freshness uses the local <code>epochPair</code>; integrated immutable update history is absent.</li>
+<li>Synchronization is a snapshot broadcast rather than full update replay.</li>
+<li>There is no explicit global election deadline beyond per-hop progress and competition rules.</li>
+<li>The branch’s focused tests emphasize data structures/validation and do not simulate every healthy/crashing ring sequence end to end.</li>
+</ul>
+<h2>13. Test map</h2>
+<p><code>TestElectionTransaction</code> checks:</p>
+<ul>
+<li>epoch/sequence/ID candidate ordering;</li>
+<li>no-update candidate behavior;</li>
+<li>ring wraparound and skipped IDs;</li>
+<li>message immutability;</li>
+<li>ACK and timeout metadata;</li>
+<li>synchronization defensive copy/validation; and</li>
+<li>malformed election rejection.</li>
+</ul>
+<p>Needed additional tests include full token circulation, neighbor crash skip, best-candidate crash, two initiators converging, and exactly-once callbacks on all survivors.</p>
+<h2>14. Exam rehearsal</h2>
+<p><strong>Why use freshness before replica ID?</strong> The new coordinator must possess the best recovery knowledge. ID is only a deterministic tie-breaker.</p>
+<p><strong>Why ACK after forwarding?</strong> It transfers responsibility for progress; the previous sender may stop retrying only after the receiver has continued the token.</p>
+<p>The invariant to remember is: <strong>for each failed coordinator, correct replicas converge on one surviving election token and one best available candidate, while each failed next hop is eventually skipped.</strong></p>
+<h2>15. Walk a token around a five-replica ring</h2>
+<pre class="diagram">R0 -> R1 -> R2 -> R3 -> R4 -> R0
+ |                               |
+ +-- election token: candidate=R0, observed=(2,4)
+
+R1 compares its state, keeps newer candidate if any, forwards
+R2 does the same ... R4 forwards to R0
+R0 sees its own token again -> install winner -> synchronize</pre>
+<p>The ring gives each survivor a chance to contribute recovery knowledge. It is
+not a broadcast tree: a crashed next hop must be skipped, and an ACK means the
+next participant accepted responsibility for forwarding. The election result
+is still incomplete until the synchronization phase installs a consistent
+snapshot/history.</p>
+<h2>16. Code microscope: candidate comparison and token identity</h2>
+<p>Candidate comparison should be deterministic and explainable: prefer a
+non-empty observed epoch, then a newer <code>EpochPair</code>, then a higher replica ID as
+a tie-breaker. A token also needs an attempt/generation so an old ACK cannot
+advance a newer circulation after a timeout.</p>
+<pre class="code-microscope">if (incoming.observed().isNewerThan(best.observed()))
+    best = incoming;
+else if (sameEpoch(incoming, best)
+         && incoming.replicaId() &gt; best.replicaId())
+    best = incoming; // deterministic tie-break
+
+if (ack.attempt() != currentAttempt) return; // stale ACK
+forwardToNextLive(token.with(best));</pre>
+<p>When a candidate or next hop is dead, the sender needs a bounded traversal
+strategy. Blindly retrying a dead actor can keep the mailbox busy forever;
+skipping it without recording the skip can make the proof of ring coverage
+unclear. Tests should observe both the skip and eventual completion.</p>
+<h2>17. Competing elections and convergence</h2>
+<p>Two followers may detect silence close together and start tokens. The protocol
+must make both circulations converge on one winner rather than install two
+coordinators. Typical tools are a deterministic candidate order, token identity,
+and forwarding rules that absorb an inferior token. Draw two tokens crossing
+the same edge and mark which one survives; if the design cannot explain that
+picture, it is not yet a convergence argument.</p>
+<h3>Practice</h3>
+<p>Create a table for replicas with observed epochs <code>(3,8)</code>, <code>(3,10)</code>, and <code>(4,0)</code>
+and IDs 1–3. Which candidate wins, and why? Then repeat with the best candidate
+crashed before synchronization and explain what the recovery layer must do.</p>
+</body>
+</html>

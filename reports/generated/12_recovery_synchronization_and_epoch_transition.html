@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Recovery, Synchronization, and Epoch Transition</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}
+</style>
+</head>
+<body>
+<h1>Recovery, Synchronization, and Epoch Transition</h1>
+<blockquote>
+<p><strong>Learning goal.</strong> Separate leader selection from state recovery and understand what a new coordinator must finish before normal writes are safe again.</p>
+</blockquote>
+<p><strong>Implementation inspected:</strong> <code>feature/electionTransaction</code> at <code>d1222a2</code>.<br />
+<strong>Specification requirement:</strong> recover incomplete/missing updates and preserve uniform agreement.<br />
+<strong>Status:</strong> snapshot synchronization is implemented; full history replay is not.</p>
+<h2>1. Election is not the finish line</h2>
+<p>Election answers:</p>
+<pre><code class="language-text">Which surviving replica should lead?
+</code></pre>
+<p>Recovery answers:</p>
+<pre><code class="language-text">Which updates must exist, in what order, on every correct replica?
+</code></pre>
+<p>A system that chooses a single leader but discards an update applied by another replica violates uniform agreement. The new coordinator must become authoritative only after it has reconciled old-term work.</p>
+<h2>2. <code>SynchronizationMsg</code> contents</h2>
+<p>The current message carries:</p>
+<ul>
+<li>election transaction ID;</li>
+<li>message/start epoch metadata;</li>
+<li>sender ActorRef;</li>
+<li>failed coordinator ID;</li>
+<li>new coordinator ID;</li>
+<li>new epoch pair; and</li>
+<li>a defensive copy of the winner’s <code>positions[]</code>.</li>
+</ul>
+<p>The constructor copies the array and the getter returns another copy. This prevents sender and receiver actors from sharing mutable application state.</p>
+<h2>3. Winner-side transition</h2>
+<p><code>Replica.completeElectionAsWinner</code> performs:</p>
+<ol>
+<li>deduplicate completion for the failed coordinator;</li>
+<li>find the local election FSM and move it to <code>SYNCHRONIZING</code>;</li>
+<li>scan candidates for the maximum observed epoch;</li>
+<li>choose new pair <code>&lt;maxEpoch + 1, 0&gt;</code>;</li>
+<li>set local <code>coordinatorID</code> to self;</li>
+<li>install the new pair;</li>
+<li>invoke <code>callbackOnCoordinatorElected(self)</code>;</li>
+<li>send synchronization snapshot to every other replica;</li>
+<li>restart heartbeat for the new term; and</li>
+<li>complete/remove election transactions.</li>
+</ol>
+<p>The candidate selection algorithm routes the final list to the freshest winner, so the copied snapshot is intended to come from that replica.</p>
+<h2>4. Follower validation</h2>
+<p>Before applying synchronization, a follower checks:</p>
+<ul>
+<li>it is not crashed;</li>
+<li>transaction, epoch, and sender are non-null;</li>
+<li>failed and new coordinator IDs differ;</li>
+<li>its current coordinator is the announced failed coordinator;</li>
+<li>new coordinator exists in membership;</li>
+<li>sender equals that coordinator’s ActorRef;</li>
+<li>message epoch equals announced new epoch;</li>
+<li>new epoch is strictly greater than local epoch, if local exists; and</li>
+<li>positions array length matches.</li>
+</ul>
+<p>These checks prevent an unexpected replica, stale term, or malformed snapshot from replacing local leadership/state.</p>
+<h2>5. Follower application</h2>
+<p>For the first valid synchronization about this failed coordinator, follower:</p>
+<ol>
+<li>marks that failure term completed;</li>
+<li>moves matching election FSMs to synchronizing;</li>
+<li>copies the snapshot into its own array;</li>
+<li>installs new coordinator and epoch;</li>
+<li>invokes coordinator-elected callback;</li>
+<li>replaces heartbeat transaction; and</li>
+<li>removes completed election FSMs.</li>
+</ol>
+<p>Duplicate later synchronization is ignored through <code>completedElectionCoordinators</code> and epoch validation.</p>
+<h2>6. Why the new epoch must be newer</h2>
+<p>Old coordinator messages may still be in FIFO queues or actor mailboxes. A strictly newer epoch lets replicas distinguish old-term update traffic from new-term work.</p>
+<p>Choosing one greater than the maximum candidate epoch ensures the new term outranks every candidate’s known term. Sequence zero establishes the starting point for the term.</p>
+<p>Final integration must define whether <code>&lt;newEpoch,0&gt;</code> is a term marker or the first assignable update ID. That choice must agree with update assignment logic.</p>
+<h2>7. Incomplete update example</h2>
+<p>Suppose old coordinator R0 assigned update U and sent WRITEOK to R1 but crashed before R2/R3 received it. R1 applies U. Later R1 also crashes, but before election a surviving quorum member R2 had observed U during UPDATE.</p>
+<p>Uniform agreement requires the new coordinator to discover U and complete it. Merely copying the winner’s current array works only if the winner definitely contains every update that must survive. A robust history-based design instead reasons from immutable ordered update records and their phase/status.</p>
+<p>The specification explicitly says interrupted broadcasts must be detected and completed before new-epoch writes.</p>
+<h2>8. Snapshot versus history replay</h2>
+<h3>Snapshot approach in the branch</h3>
+<p>Advantages:</p>
+<ul>
+<li>simple;</li>
+<li>defensive copy is easy;</li>
+<li>followers converge quickly to winner’s materialized array.</li>
+</ul>
+<p>Limitations:</p>
+<ul>
+<li>loses the sequence of updates that produced the array;</li>
+<li>cannot distinguish two histories ending in the same values;</li>
+<li>does not explicitly complete an old update broadcast;</li>
+<li>cannot send only missing updates;</li>
+<li>makes duplicate-delivery reasoning harder; and</li>
+<li>assumes winner’s array is authoritative, not merely winner’s observed history.</li>
+</ul>
+<h3>History replay required for a complete report/design</h3>
+<p>A richer recovery exchange needs ordered immutable records such as:</p>
+<pre><code class="language-text">&lt;epoch,sequence&gt; -&gt; (index, value, observed/committed evidence)
+</code></pre>
+<p>The winner determines the common prefix and missing suffix, resolves interrupted work, sends updates in order, receives whatever acknowledgements the design requires, then opens the new epoch to client writes.</p>
+<h2>9. Synchronization completion acknowledgement</h2>
+<p>The current winner broadcasts snapshots and immediately restarts heartbeat/removes election transactions. It does not wait for synchronization ACKs from a quorum or all correct followers.</p>
+<p>Because channels are reliable, followers should eventually receive the message if they remain correct. However, the statement “only after synchronization completes does the coordinator resume writes” needs a concrete completion criterion. A final design should define whether send completion, quorum ACK, or all reachable ACKs is sufficient.</p>
+<h2>10. Old transaction cleanup</h2>
+<p><code>restartHeartbeat</code> removes the old heartbeat FSM from active routing and starts a new coordinator-scoped one. Old scheduled messages can still arrive but have no active transaction match.</p>
+<p>Election transactions for the failed coordinator are moved to <code>DONE</code> and removed. Sets/maps remember scheduled, started, and completed failure terms to reject duplicates.</p>
+<p>A complete integration should also decide what happens to old update and write transactions: retry, reconstruct, finish, or invalidate. Removing election state alone does not recover application work.</p>
+<h2>11. Safety and liveness questions</h2>
+<p>Safety questions:</p>
+<ul>
+<li>Can an old coordinator’s late message overwrite new-term state?</li>
+<li>Can two synchronization messages install different leaders?</li>
+<li>Can an applied old update disappear from the snapshot?</li>
+<li>Can a missing update be applied twice during replay?</li>
+</ul>
+<p>Liveness questions:</p>
+<ul>
+<li>What if a follower misses synchronization until much later?</li>
+<li>What if the elected winner crashes while synchronizing?</li>
+<li>What exact event allows new client writes?</li>
+<li>How is a new election triggered during recovery?</li>
+</ul>
+<p>The current branch answers some stale/malformed-message safety questions but not the full recovery/liveness set.</p>
+<h2>12. Tests and missing evidence</h2>
+<p>Current election regression tests verify defensive array copies, unexpected-sender rejection, invalid synchronization not poisoning the term, and malformed election input rejection.</p>
+<p>Needed system tests include:</p>
+<ul>
+<li>divergent arrays converge;</li>
+<li>old-epoch synchronization is ignored;</li>
+<li>incomplete update is completed on all survivors;</li>
+<li>new writes wait until recovery criterion;</li>
+<li>winner crashes during synchronization;</li>
+<li>heartbeat roles restart on every survivor; and</li>
+<li>callbacks occur exactly once per installed new coordinator.</li>
+</ul>
+<h2>13. Exam rehearsal</h2>
+<p><strong>Why is the freshest candidate preferred?</strong> It is most likely to hold the latest recovery evidence, reducing the chance that a required update is lost.</p>
+<p><strong>Why is copying <code>positions[]</code> not automatically equivalent to replaying history?</strong> A snapshot contains final values but not update identity, order, or incomplete-broadcast evidence.</p>
+<p>The invariant to remember is: <strong>no new-term write may overtake recovery of an old-term update that uniform agreement requires the correct replicas to retain.</strong></p>
+<h2>14. Recovery is a barrier, not just a copy</h2>
+<pre class="diagram">election winner chosen
+        |
+        v
+winner gathers freshest state/history
+        |
+        +--> validate snapshot + source + epoch
+        |
+        +--> send SynchronizationMsg to survivors
+                         |
+                 install atomically
+                         |
+                 start heartbeat in new term
+                         |
+                 release queued/new writes</pre>
+<p>The barrier matters because a new coordinator can otherwise assign a new
+sequence number while an older quorum decision is still unknown. “Copy the
+array” is only one step; a safe transition also defines when history, current
+epoch, pending transactions, and heartbeat role become visible together.</p>
+<h2>15. Code microscope: validating a SynchronizationMsg</h2>
+<p>Treat synchronization input as untrusted protocol data even when it comes from
+the elected winner. A receiver should check the sender is the selected
+coordinator, the message belongs to the new term, array dimensions match, and
+the supplied history is internally ordered. Only after validation should it
+replace local state.</p>
+<pre class="code-microscope">onSynchronization(msg):
+    if (sender() != coordinator) return;
+    if (!msg.epoch().isNewerThan(localEpoch)) return;
+    if (!validShape(msg.positions(), expectedLength)) return;
+    if (!ordered(msg.history())) return;
+    installSnapshotAndHistory(msg); // one actor turn, then restart heartbeat
+</pre>
+<p>An actor turn gives atomicity with respect to that replica’s other handlers, but
+it does not make installation atomic across replicas. The protocol must still
+define whether it waits for synchronization acknowledgements and what happens
+if the winner crashes halfway through.</p>
+<h2>16. Snapshot and history are different promises</h2>
+<p>Suppose a partial update changed index 1 on two of five replicas and the old
+coordinator crashed. A winner with the newest observed history can preserve
+that update; a winner with only the most common array value may erase it. If
+the specification requires uniform agreement, recovery needs a rule for this
+partial state (complete it, roll it back before exposure, or mark it unresolved)
+and tests for each branch.</p>
+<h3>Practice</h3>
+<p>Draw the messages when the synchronization winner crashes after sending to one
+follower. Which replicas may serve reads? Which epoch should the second
+election advertise? Answer using explicit state, not the wall-clock order of
+messages.</p>
+</body>
+</html>

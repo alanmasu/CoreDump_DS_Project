@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Transaction, Message, and Dispatch Framework</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}
+</style>
+</head>
+<body>
+<h1>Transaction, Message, and Dispatch Framework</h1>
+<blockquote>
+<p><strong>Learning goal.</strong> Understand how the project hosts several finite-state machines inside actors and routes each message to the right conversation.</p>
+</blockquote>
+<p><strong>Snapshot:</strong> <code>feature/electionTransaction</code> at <code>d1222a2</code>.<br />
+<strong>Key files:</strong> <code>Transaction.java</code>, <code>Msg.java</code>, <code>EpochPair.java</code>, <code>DistributedActor.java</code>, <code>Client.java</code>, <code>Replica.java</code>, <code>ProbeTransaction.java</code>.</p>
+<h2>1. Why the project introduces transactions</h2>
+<p>Akka tells an actor which message arrived, but it does not automatically group messages into a higher-level operation. A write may involve request, update, acknowledgements, completion, and timeout. An election may involve forwarding attempts, ACKs, timeouts, and synchronization.</p>
+<p>The project represents each such conversation as a <code>Transaction</code> finite-state machine. A transaction is an ordinary Java object owned by one actor. It provides:</p>
+<ul>
+<li><code>start()</code> to begin the operation;</li>
+<li><code>computeState(Msg)</code> to process an event;</li>
+<li><code>getState()</code> for logging and debugging; and</li>
+<li>a shared identity, owner, start epoch, and optional cancellable timeout.</li>
+</ul>
+<h2>2. Three identities students often confuse</h2>
+<h3>Actor identity</h3>
+<p>An <code>ActorRef</code> identifies an Akka actor address. A numeric replica ID identifies its position in project membership. The two are connected by <code>Map&lt;Integer, ActorRef&gt;</code>.</p>
+<h3>Transaction identity</h3>
+<p><code>TransactionId</code> is <code>⟨initiator ActorRef, sequenceNumber⟩</code>. It correlates messages belonging to one transaction conversation. Client 1’s sequence 0 and client 2’s sequence 0 are different because their initiators differ.</p>
+<h3>Update order identity</h3>
+<p><code>EpochPair</code> is <code>⟨epoch, sequence⟩</code>. It orders replicated updates. It is not a routing key for every transaction.</p>
+<p>Example:</p>
+<pre><code class="language-text">WriteTransaction ID: &lt;Client_1, 3&gt;
+UpdateTransaction ID: &lt;Replica_2, 8&gt;
+Committed update order: &lt;epoch 4, sequence 12&gt;
+</code></pre>
+<p>These can describe related work while remaining distinct. Reusing the parent write transaction ID for a simultaneously active child update on the same replica can make <code>Replica.onMessage</code> deliver to the wrong FSM.</p>
+<h2>3. Base message metadata</h2>
+<p>Every protocol message extending <code>Msg</code> carries:</p>
+<ul>
+<li><code>transactionId</code>: which conversation should receive it;</li>
+<li><code>epochPair</code>: term/update context, which may be null in incomplete branches; and</li>
+<li><code>sender</code>: explicit logical sender metadata.</li>
+</ul>
+<p><code>Msg.equals</code> also requires the concrete message class to match. A <code>WriteTimeoutMsg</code> cannot equal a <code>WriteFinishMsg</code> merely because metadata is identical.</p>
+<p>Subclasses add protocol payload: an index and value, coordinator ID, watchdog version, candidate list, or synchronized positions.</p>
+<p>Messages crossing actor boundaries should be immutable. Election code copies candidate lists and position arrays so a sender cannot mutate data after transmission.</p>
+<h2>4. The owner interface</h2>
+<p><code>DistributedActor</code> is the bridge between generic transactions and concrete actors. It provides the operations a transaction needs:</p>
+<ul>
+<li>obtain self/context;</li>
+<li>schedule a local message;</li>
+<li>unicast;</li>
+<li>allocate transaction IDs;</li>
+<li>schedule and complete transactions; and</li>
+<li>log/debug.</li>
+</ul>
+<p>Both <code>Client</code> and <code>Replica</code> implement it, allowing <code>Transaction.owner</code> to use one interface. Individual transactions may still require a concrete owner—for example, heartbeat must read replica timing and coordinator fields.</p>
+<h2>5. Client transaction scheduling</h2>
+<p>The client maintains:</p>
+<pre><code class="language-text">currentTransaction
+scheduledTransactions FIFO queue
+</code></pre>
+<p>Scheduling rules:</p>
+<ol>
+<li>If idle, assign the new transaction to <code>currentTransaction</code> and call <code>start()</code>.</li>
+<li>Otherwise, enqueue it.</li>
+<li>On completion, poll the next transaction and start it.</li>
+</ol>
+<p>Incoming protocol messages are accepted only when their transaction ID equals the current transaction’s ID. Idle or foreign messages are discarded.</p>
+<p>This is both a safety and ordering mechanism. A late result from an old operation must not finish the new operation.</p>
+<h2>6. Replica transaction scheduling</h2>
+<p>The replica keeps a list of <code>activeTransactions</code>. Scheduling adds and starts immediately. Routing scans a snapshot of that list and invokes the first transaction with a matching ID.</p>
+<p>Using a copied <code>ArrayList</code> during iteration matters because <code>computeState</code> may complete and remove the transaction. Iterating the original list while modifying it could cause a concurrent-modification failure even though only one actor thread is involved.</p>
+<p>The current dispatcher assumes active transaction IDs are unique locally. That invariant is not enforced by a map; it must be preserved by ID allocation and parent/child protocol design.</p>
+<h2>7. Special entry messages</h2>
+<p>Not every message can go directly to an existing transaction.</p>
+<ul>
+<li>A new <code>WriteMsg</code> causes the contacted replica to create a <code>WriteTransaction</code> with the client’s transaction ID.</li>
+<li>A new <code>ElectionMsg</code> may create a participant election, join an existing one, replace a competing election, or be rejected.</li>
+<li><code>SynchronizationMsg</code> is validated against replica-wide coordinator and epoch state before application.</li>
+<li>Other already-correlated messages pass through <code>defaultDispatcher</code> to <code>onMessage</code>.</li>
+</ul>
+<p>This division separates <strong>transaction discovery/creation</strong> from <strong>transaction event processing</strong>.</p>
+<h2>8. Timers use the same routing path</h2>
+<p>A transaction schedules timeout messages carrying its own ID. Later, the owner receives the timeout like any other mailbox event and routes it back to that FSM.</p>
+<p>Because the message can be late, a robust transaction checks more than the ID:</p>
+<ul>
+<li>current FSM state;</li>
+<li>timeout or attempt version;</li>
+<li>expected sender/target;</li>
+<li>expected coordinator term or epoch.</li>
+</ul>
+<p>ID equality answers “which conversation?” It does not answer “is this event still valid now?”</p>
+<h2>9. Transaction completion</h2>
+<p>Completion has two parts:</p>
+<ol>
+<li>The transaction updates its terminal state and cancels relevant timers.</li>
+<li>It calls <code>owner.onTransactionComplete(this)</code>.</li>
+</ol>
+<p>For a client, completion advances the queue. For a replica, completion removes the FSM from <code>activeTransactions</code>.</p>
+<p>Order deserves care. If the owner removes or starts another transaction before the old FSM reaches its final state, a synchronous test or debug trace can observe surprising intermediate state. The code is not generally reentrant across actors, but actor-local method calls are immediate.</p>
+<h2>10. ProbeTransaction</h2>
+<p><code>ProbeTransaction</code> is infrastructure for testing the generic transaction pipeline. It exchanges <code>start</code>, <code>ack</code>, and <code>done</code> strings to demonstrate scheduling, routing, reply, and completion.</p>
+<p>It should not be presented as part of the distributed storage protocol. Its value is architectural: if probe routing fails, higher-level transactions cannot be trusted even if their individual FSM logic looks correct.</p>
+<h2>11. Current gaps and risks</h2>
+<ul>
+<li><code>EpochPair</code> metadata is still null in several branch implementations.</li>
+<li>The dispatcher is a linear scan and silently picks the first duplicate ID.</li>
+<li>Some unexpected transaction messages throw <code>IllegalArgumentException</code>, while other stale messages are ignored; that policy is not uniform.</li>
+<li>Client and replica transaction scheduling have intentionally different concurrency rules.</li>
+<li>Feature branches add message classes and receive handlers independently, so final integration can accidentally omit a handler.</li>
+</ul>
+<h2>12. Verification map</h2>
+<ul>
+<li><code>TestMsgClass</code>: equality, hashing, null metadata, and string representation.</li>
+<li><code>TestEpochPair</code>: lexicographic ordering and hash/equality behavior.</li>
+<li><code>TestDispatcher</code>: replica/client routing and dropping idle or foreign messages.</li>
+<li><code>ProbeTransaction</code>: generic start/ack/done transaction plumbing.</li>
+<li>Protocol tests: verify that messages keep their transaction metadata.</li>
+</ul>
+<p>These tests establish pieces of the framework. They do not prove global uniqueness of active IDs across every integrated protocol.</p>
+<h2>13. Exam rehearsal</h2>
+<p><strong>Why does <code>Replica</code> allow several active transactions?</strong> It must run background heartbeat and possibly election/update work concurrently. Messages are separated by transaction IDs.</p>
+<p><strong>Why is <code>EpochPair</code> not enough for dispatch?</strong> Several local FSMs may relate to the same epoch, and a transaction may begin before a stable update pair is assigned. Epoch pairs order updates; transaction IDs correlate conversations.</p>
+<p>The invariant to remember is: <strong>every active local FSM needs an unambiguous routing identity, and every event must also be checked against the FSM’s current state or generation.</strong></p>
+<h2>14. Follow one message through the framework</h2>
+<pre class="diagram">Akka mailbox message
+        |
+        v
+DistributedActor.receive
+        |
+        +-- special entry? (Init, crash, client request)
+        |
+        +-- transactionId lookup in activeTransactions
+                              |
+                              v
+                    Transaction.onMessage
+                              |
+                 state + sender + payload checks
+                              |
+                 next state / outgoing message / callback</pre>
+<p>This is a two-level dispatch. First, the actor decides <em>which conversation</em>
+should receive the message. Second, the transaction decides <em>whether that
+conversation is ready</em> for the message. A message can therefore be correctly
+addressed and still be invalid—for example, an ACK arriving after the
+transaction already timed out.</p>
+<h2>15. Code microscope: identity is a routing key, not a timestamp</h2>
+<p><code>TransactionId</code> usually contains an actor reference and a numeric value. The
+actor reference identifies the owner; the number distinguishes several local
+transactions. <code>EpochPair</code> has a different job: it orders replicated updates.
+Do not replace one with the other just because both are small value objects.</p>
+<table><tr><th>Question</th><th>Use this field</th><th>Reason</th></tr>
+<tr><td>Which local FSM should receive this message?</td><td><code>TransactionId</code></td><td>Dispatch is local to one actor.</td></tr>
+<tr><td>Which update is newer?</td><td><code>EpochPair</code></td><td>Comparison provides replicated ordering.</td></tr>
+<tr><td>Who sent the message?</td><td>Akka sender / channel envelope</td><td>Prevents an arbitrary actor from impersonating a role.</td></tr>
+<tr><td>Is this timer still current?</td><td>generation or watchdog version</td><td>Cancellation cannot erase an already queued event.</td></tr></table>
+<pre class="code-microscope">// Conceptual dispatch guard
+Transaction t = activeTransactions.get(message.transactionId());
+if (t == null) return;                 // unknown or already finished
+if (!t.accepts(message, sender())) return; // stale/wrong-state message
+t.onMessage(message);                  // only now mutate FSM state</pre>
+<p>The <code>t == null</code> branch is normal in an asynchronous system: a timeout and a
+success may race, and the first terminal path removes the transaction. Tests
+should assert that the second event is ignored, not that it can never exist.</p>
+<h2>16. Parent and child conversations</h2>
+<p>A write commonly creates a client-facing parent and a replica-local child.
+They can have different owners and IDs. The child reports <code>WriteFinishMsg</code> to
+the parent owner; the parent later sends <code>WriteResultMsg</code> to the client. Draw
+both IDs in a trace. If a message contains only the child ID, the parent may
+never find it; if every layer reuses the client ID, unrelated local FSMs can
+collide.</p>
+<h3>Practice</h3>
+<p>Add a test case for an ACK with a valid-looking epoch but the wrong
+<code>TransactionId</code>. Predict which dispatch guard drops it and why accepting it
+would corrupt a different update.</p>
+</body>
+</html>

@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Replicated State, Epochs, and Update History</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}
+</style>
+</head>
+<body>
+<h1>Replicated State, Epochs, and Update History</h1>
+<blockquote>
+<p><strong>Learning goal.</strong> Understand what data each replica stores, how updates are ordered, and why a history is needed in addition to the current array.</p>
+</blockquote>
+<p><strong>Current snapshot:</strong> <code>feature/electionTransaction</code> at <code>d1222a2</code>.<br />
+<strong>History implementation inspected separately:</strong> <code>origin/feat/UpdateTransaction</code> at <code>59bbe80</code>.</p>
+<h2>1. Four kinds of replica state</h2>
+<p>A replica stores several categories of state that answer different questions.</p>
+<h3>Application state</h3>
+<p><code>positions[]</code> is the database visible to reads. <code>getPosition</code> and <code>setPosition</code> validate indexes against the fixed list length.</p>
+<h3>Leadership state</h3>
+<p><code>coordinatorID</code> records which numeric replica ID this actor currently believes is coordinator.</p>
+<h3>Ordering state</h3>
+<p><code>epochPair</code> records the newest ordering position known locally. It combines coordinator term and sequence within the term.</p>
+<h3>Protocol state</h3>
+<p><code>activeTransactions</code>, heartbeat FSM, election sets/maps, crash status, and—on the update branch—<code>updateHistory</code> remember ongoing work and recovery evidence.</p>
+<p>Do not treat all four as one “database.” The array is the current materialized value; history and protocol state explain how that value was reached and what may still need completion.</p>
+<h2>2. The position array</h2>
+<p>Every replica constructs an integer array of <code>AbstractReplica.POSITIONS_LIST_LENGTH</code>, currently 100. Java initializes it to zero.</p>
+<p>A local read returns one element. A committed update eventually changes one element. The callback <code>callbackOnUpdateApplied(index, value)</code> must fire immediately after a real local application so tests can observe delivery.</p>
+<p>Setting <code>positions[index]</code> is not by itself a distributed update. The total-order protocol determines when the write is allowed to become visible.</p>
+<h2>3. Lexicographic epoch ordering</h2>
+<p><code>EpochPair.compareTo</code> first compares epoch, then sequence:</p>
+<pre><code class="language-text">&lt;1, 9&gt; &lt; &lt;1, 10&gt;
+&lt;1, 999&gt; &lt; &lt;2, 0&gt;
+</code></pre>
+<p>The second comparison is valid because a newer coordinator term outranks every sequence from an older term.</p>
+<p><code>Replica.setEpochPair</code> rejects null and prevents moving backwards. Equal values are accepted. This protects one local monotonicity invariant but does not itself prove that every replica advances consistently.</p>
+<h2>4. A branch-level initialization mismatch</h2>
+<p>The update branch initializes <code>epochPair</code> to <code>&lt;0,0&gt;</code>. The current election branch leaves it at Java’s default <code>null</code> until later behavior sets it. Heartbeat messages tolerate a null start pair during initial setup.</p>
+<p>This is not a cosmetic difference. Candidate construction distinguishes “has observed an update” from “no observed update” based on whether the local epoch pair is null. Final integration must define one clear meaning for the initial pair:</p>
+<ul>
+<li>Does <code>&lt;0,0&gt;</code> mean no update yet?</li>
+<li>Or does it identify the first real update?</li>
+<li>Should no-history be represented separately?</li>
+</ul>
+<p>The election code already models no observed update explicitly in <code>ElectionCandidate</code>, which avoids inventing history simply to remove null.</p>
+<h2>5. Update history</h2>
+<p>The specification says replicas retain observed updates for recovery. The update feature branch uses:</p>
+<pre><code class="language-text">Map&lt;EpochPair, UpdateTransaction&gt; updateHistory
+</code></pre>
+<p>Conceptually, a durable history record should contain immutable update facts:</p>
+<pre><code class="language-text">epochPair -&gt; (index, value, observed/committed status)
+</code></pre>
+<p>Storing a mutable FSM object is convenient during development, but it couples recovery data to transaction lifecycle and owner state. A report must document what the actual map contains, not silently replace it with an ideal design.</p>
+<p>The map is absent from the current election branch. Consequently, current synchronization cannot calculate a per-follower list of missing update records.</p>
+<h2>6. Observed versus committed</h2>
+<p>These terms must be kept separate.</p>
+<ul>
+<li>A replica <strong>observes</strong> an update when it receives enough information to remember the proposed <code>(index, value, epochPair)</code>.</li>
+<li>A replica <strong>commits/applies</strong> the update when it receives valid <code>WRITEOK</code> and mutates <code>positions[]</code>.</li>
+</ul>
+<p>During coordinator failure, one replica may have observed an update without applying it. Another may have applied it before crashing. Uniform agreement requires recovery to determine whether that update must be completed across survivors.</p>
+<p>The election candidate needs the freshest observed order information because the most useful new coordinator is the one with the best recovery evidence, not merely the one whose array happens to contain a value.</p>
+<h2>7. Why current values are insufficient</h2>
+<p>Suppose index 4 originally contains 10:</p>
+<pre><code class="language-text">U1: &lt;2,7&gt; sets index 4 to 20
+U2: &lt;2,8&gt; sets index 4 back to 10
+</code></pre>
+<p>Looking only at <code>positions[4] == 10</code> cannot reveal whether neither update occurred or both occurred. History preserves order and identity, which are required for duplicate prevention and recovery.</p>
+<p>Similarly, sending only a final snapshot can make arrays converge but cannot necessarily prove that all required update deliveries and ordering semantics were honored.</p>
+<h2>8. Snapshot synchronization in the current branch</h2>
+<p><code>SynchronizationMsg</code> contains:</p>
+<ul>
+<li>failed coordinator ID;</li>
+<li>new coordinator ID;</li>
+<li>new epoch pair;</li>
+<li>a copied positions array; and</li>
+<li>transaction/sender metadata.</li>
+</ul>
+<p>The constructor copies the input array, and <code>getPositions()</code> returns another copy. This protects actor encapsulation: the sender and receiver cannot mutate the same array object.</p>
+<p>Followers validate sender identity, expected failed coordinator, strictly newer epoch, and array length before copying the snapshot into local state.</p>
+<p>This is useful state convergence, but it is narrower than full history-based replay of incomplete updates required by the specification.</p>
+<h2>9. Choosing the new epoch</h2>
+<p>The current election winner scans candidates for the maximum observed epoch and chooses:</p>
+<pre><code class="language-text">newEpoch = maximumObservedEpoch + 1
+newSequence = 0
+</code></pre>
+<p>That makes the new term newer than all candidate terms. A full recovery design must decide whether sequence zero is reserved as the starting marker or used for the first new update, and whether incomplete old-epoch work is completed before advancing.</p>
+<p>The specification’s key requirement is that old incomplete work is resolved before normal writes in the new epoch.</p>
+<h2>10. State invariants worth memorizing</h2>
+<ol>
+<li>A replica’s epoch pair never moves backwards.</li>
+<li>One <code>EpochPair</code> identifies at most one logical update.</li>
+<li>An applied update must have been previously proposed.</li>
+<li>The same update is applied at most once per replica.</li>
+<li>New-epoch updates do not overtake recovery of required old-epoch updates.</li>
+<li>Message payloads crossing actors do not expose mutable arrays or lists.</li>
+<li>Current array values alone are not a sufficient recovery history.</li>
+</ol>
+<h2>11. Verification and missing evidence</h2>
+<p><code>TestEpochPair</code> checks ordering and equality. Election tests check candidate ordering and defensive copying of synchronization arrays. Callback contract tests check that update application is reported somewhere in code.</p>
+<p>Missing or incomplete evidence includes:</p>
+<ul>
+<li>integrated history persistence;</li>
+<li>replay of missing updates after election;</li>
+<li>duplicate application prevention across retries;</li>
+<li>concurrent writes to the same index;</li>
+<li>consistent initialization semantics for the first epoch pair; and</li>
+<li>end-to-end convergence after a partially disseminated WRITEOK.</li>
+</ul>
+<h2>12. Exam rehearsal</h2>
+<p><strong>Why keep history if every replica already has <code>positions[]</code>?</strong> The array contains only the latest materialized values. Recovery needs update identity, order, and information about incomplete work; two different histories can produce the same array.</p>
+<p><strong>What does <code>&lt;epoch, sequence&gt;</code> guarantee?</strong> It supplies a total ordering key for updates when correctly assigned and propagated. The class comparison alone does not enforce broadcast, quorum, or delivery.</p>
+<p>The invariant to remember is: <strong>the array answers “what value do I expose now?”, while history answers “which ordered updates justify and may still affect that value?”</strong></p>
+<h2>13. Three layers of replica state</h2>
+<pre class="diagram">protocol state: coordinator, FSM phase, pending ACK set
+        |
+        v
+ordering state: current EpochPair, next sequence, term ownership
+        |
+        v
+materialized state: positions[index] values exposed to reads
+        |
+        v
+recovery evidence: committed history + observed/incomplete updates</pre>
+<p>Students often inspect only <code>positions[]</code>. That is the materialized cache, not
+the whole replicated state. A coordinator can have evidence that an update
+reached a quorum even when one follower’s array is still old. During recovery,
+the candidate needs the evidence and ordering metadata to decide whether to
+replay, install, or ignore that update.</p>
+<h2>14. Code microscope: compare an epoch pair by meaning</h2>
+<p>An <code>EpochPair</code> can be read as <code>(term, sequence)</code>. A larger term means a newer
+coordinator generation; within one term, a larger sequence means a later
+update. A comparison helper is useful only if every caller uses the same
+ordering and rejects malformed values.</p>
+<pre class="code-microscope">// Study pseudocode, not a replacement implementation
+int compare(EpochPair a, EpochPair b) {
+    if (a.term() != b.term()) return compare(a.term(), b.term());
+    return compare(a.sequence(), b.sequence());
+}
+
+if (incoming.compareTo(local) &lt;= 0) {
+    ignoreAsStale();       // duplicate delivery is harmless
+} else {
+    rememberForRecovery(incoming);
+}</pre>
+<p>The <code>&amp;lt;= 0</code> test gives idempotence: a retransmitted update must not be applied
+twice. It does not, by itself, prove that a missing intermediate sequence can
+be skipped. If the protocol requires contiguous history, add a separate
+“expected next pair” check and a recovery path.</p>
+<h2>15. Snapshot versus replay: a concrete example</h2>
+<p>Start with <code>positions[2] = 0</code>. Update A sets it to 4, then update B sets it to
+9. A snapshot containing only <code>9</code> lets a new replica answer a current read,
+but it cannot prove whether B followed A, whether A was committed, or whether
+another index was changed between them. A history containing <code>(term,1,A)</code> and
+<code>(term,2,B)</code> answers those questions and can be checked against another
+replica’s history. This is why recovery reports must discuss both arrays and
+history rather than treating them as interchangeable.</p>
+<h2>16. Initialization and nullability checklist</h2>
+<p>Trace the first update from <code>InitSystem</code>. What is the starting epoch? Is it a
+real pair such as <code>(0,0)</code>, or a nullable field that is filled later? A nullable
+starting pair may be acceptable in a constructor, but it becomes dangerous if
+the update protocol calls comparison, history insertion, or serialization before
+the field is assigned. For every nullable protocol field, document the state in
+which null is legal and the guard that prevents earlier use.</p>
+<h3>Practice</h3>
+<p>Construct two histories that produce the same final <code>positions[]</code> array but
+have different update order. Explain why a recovery algorithm that copies only
+the array cannot distinguish them, then name the metadata it should transfer.</p>
+</body>
+</html>

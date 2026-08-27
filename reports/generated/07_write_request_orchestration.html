@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Write Request Orchestration</title>
+<style>
+@page {
+  size: A4;
+  margin: 18mm 17mm 20mm 17mm;
+}
+
+body {
+  font-family: "Liberation Sans", "DejaVu Sans", sans-serif;
+  color: #172033;
+  font-size: 10.5pt;
+  line-height: 1.48;
+  max-width: 175mm;
+  margin: 0 auto;
+}
+
+/* The reports are meant to be studied on screen as well as printed.  These
+   small visual conventions make definitions, source-code close-ups, and
+   protocol traces easy to find without turning the pages into slides. */
+h1, h2, h3 {
+  page-break-after: avoid;
+}
+
+h1 {
+  color: #173f5f;
+  font-size: 24pt;
+  line-height: 1.12;
+  border-bottom: 3px solid #2f80a3;
+  padding-bottom: 8pt;
+  margin-bottom: 12pt;
+}
+
+h1 + p {
+  color: #52606d;
+  font-size: 11pt;
+}
+
+h2 {
+  color: #173f5f;
+  font-size: 16pt;
+  margin-top: 20pt;
+  border-bottom: 1px solid #bed3df;
+  padding-bottom: 3pt;
+}
+
+h3 {
+  color: #285d75;
+  font-size: 12.5pt;
+  margin-top: 15pt;
+}
+
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+li {
+  margin-bottom: 3pt;
+}
+
+blockquote {
+  margin: 12pt 0;
+  padding: 8pt 11pt;
+  border-left: 4px solid #2f80a3;
+  background: #eef6f8;
+  color: #173f5f;
+}
+
+.kicker {
+  color: #2f80a3;
+  font-size: 9pt;
+  font-weight: bold;
+  letter-spacing: 1.2pt;
+  text-transform: uppercase;
+  margin-bottom: 3pt;
+}
+
+.callout {
+  margin: 12pt 0;
+  padding: 9pt 11pt;
+  border: 1px solid #9bc2d2;
+  border-left: 6px solid #f28e2b;
+  background: #fff7ed;
+}
+
+.callout-title {
+  color: #9b4d00;
+  font-weight: bold;
+  margin-bottom: 3pt;
+}
+
+.diagram {
+  background: #173f5f;
+  color: #f4fbfd;
+  border: 0;
+  border-radius: 3pt;
+  padding: 10pt;
+  font-size: 8.5pt;
+  line-height: 1.3;
+}
+
+.code-microscope {
+  background: #f7fafc;
+  border: 2px solid #9bc2d2;
+  border-left: 6px solid #2f80a3;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12pt 0;
+  font-size: 9.2pt;
+}
+
+th, td {
+  border: 1px solid #c7d5df;
+  padding: 5pt 6pt;
+  vertical-align: top;
+}
+
+th {
+  color: #ffffff;
+  background: #173f5f;
+  text-align: left;
+}
+
+tr:nth-child(even) td {
+  background: #f3f8fa;
+}
+
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 9pt;
+  background: #f2f4f7;
+  padding: 1pt 2pt;
+}
+
+pre {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: 8.7pt;
+  line-height: 1.32;
+  background: #f2f4f7;
+  border: 1px solid #d9dee7;
+  padding: 8pt;
+  white-space: pre-wrap;
+}
+
+strong {
+  color: #122f46;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid #bed3df;
+  margin: 18pt 0;
+}
+
+.page-break {
+  page-break-before: always;
+}
+
+.small {
+  color: #52606d;
+  font-size: 9pt;
+}
+</style>
+</head>
+<body>
+<h1>Write Request Orchestration</h1>
+<blockquote>
+<p><strong>Learning goal.</strong> Separate the client-facing write conversation from the distributed UPDATE/ACK/WRITEOK algorithm and understand how parent and child transactions coordinate.</p>
+</blockquote>
+<p><strong>Wrapper implementation:</strong> <code>origin/feat/WriteTransaction</code> at <code>8c42a18</code>.<br />
+<strong>Child-update integration reference:</strong> <code>origin/feat/UpdateTransaction</code> at <code>59bbe80</code>.<br />
+<strong>Current election branch:</strong> contains the wrapper but leaves child update creation as TODO.</p>
+<h2>1. Two protocols hide behind “write”</h2>
+<p>When a client says <code>write(index, value)</code>, two different conversations begin:</p>
+<ol>
+<li><strong>WriteTransaction:</strong> client ↔ contacted replica. It owns the client’s result and timeout.</li>
+<li><strong>UpdateTransaction:</strong> replicas ↔ coordinator ↔ replicas. It owns quorum broadcast and application.</li>
+</ol>
+<p>Keeping them separate makes each FSM smaller. It also creates a correlation problem: the child update must eventually finish the correct parent write.</p>
+<h2>2. Write message vocabulary</h2>
+<p><code>WriteTransaction</code> defines:</p>
+<ul>
+<li><code>WriteMsg</code>: client request sent to the contacted replica.</li>
+<li><code>WriteFinishMsg</code>: local notification that the replica-side parent may finish.</li>
+<li><code>WriteResultMsg</code>: contacted replica’s reply to the client.</li>
+<li><code>WriteTimeoutMsg</code>: client-local timeout.</li>
+</ul>
+<p><code>WriteTransactionMsg</code> is a shared message base containing index and value.</p>
+<p>The client public API objects <code>WriteRequest</code>, <code>WriteResult</code>, and <code>WriteTimeout</code> remain separate from wire messages.</p>
+<h2>3. FSM roles</h2>
+<p>The same class runs with two owner types.</p>
+<h3>Client-owned instance</h3>
+<pre><code class="language-text">INIT -&gt; WAITING_RESULT -&gt; DONE
+                       -&gt; TIMEOUT
+</code></pre>
+<p>It sends <code>WriteMsg</code>, schedules the client’s deadline, and produces the public callback.</p>
+<h3>Replica-owned instance</h3>
+<pre><code class="language-text">INIT -&gt; WAITING_UPDATE -&gt; DONE
+</code></pre>
+<p>It starts the child <code>UpdateTransaction</code>. When it receives <code>WriteFinishMsg</code>, it returns <code>WriteResultMsg</code> to the original client.</p>
+<h2>4. Happy-path trace across both layers</h2>
+<p>Assume client C contacts follower R2 while R0 is coordinator.</p>
+<ol>
+<li>C creates <code>WriteTransaction</code> ID <code>&lt;C,0&gt;</code> and sends <code>WriteMsg(&lt;C,0&gt;, index=4, value=99)</code> to R2.</li>
+<li>C enters <code>WAITING_RESULT</code> and schedules <code>WriteTimeoutMsg(&lt;C,0&gt;)</code>.</li>
+<li>R2 receives the new write and creates its own replica-side <code>WriteTransaction</code>, deliberately using parent ID <code>&lt;C,0&gt;</code> so later completion routes to it.</li>
+<li>R2 allocates a separate child ID, for example <code>&lt;R2,0&gt;</code>, and starts <code>UpdateTransaction</code> with both IDs:
+<ul>
+<li>child ID <code>&lt;R2,0&gt;</code> for update messages;</li>
+<li>parent write ID <code>&lt;C,0&gt;</code> stored as <code>writeTid</code>.</li>
+</ul>
+</li>
+<li>The update protocol reaches commit on R2.</li>
+<li>The child sends local <code>WriteFinishMsg(transactionId=&lt;C,0&gt;)</code> to R2 itself.</li>
+<li>R2 routes that message to the parent <code>WriteTransaction</code>.</li>
+<li>Parent sends <code>WriteResultMsg(&lt;C,0&gt;, index=4, value=99, replicaId=2)</code> to C.</li>
+<li>C routes by <code>&lt;C,0&gt;</code>, cancels its timeout, invokes <code>callbackOnWriteResult</code>, and advances its queue.</li>
+</ol>
+<h2>5. Why parent and child need different IDs</h2>
+<p>R2 hosts both parent and child at the same time. <code>Replica.onMessage</code> scans active transactions and stops at the first matching ID.</p>
+<p>If both used <code>&lt;C,0&gt;</code>, an <code>UpdateAckMsg</code> or <code>WriteFinishMsg</code> could be delivered to whichever object appears first. Distinct IDs preserve local dispatch:</p>
+<pre><code class="language-text">&lt;C,0&gt;  -&gt; parent WriteTransaction
+&lt;R2,0&gt; -&gt; child UpdateTransaction
+</code></pre>
+<p><code>writeTid</code> is an explicit return address from child FSM to parent FSM.</p>
+<h2>6. The coordinator-contact case</h2>
+<p>If C contacts the coordinator directly, the replica-side parent still creates a child update ID owned by that replica. The child recognizes that its owner is coordinator and starts the coordinator role directly rather than sending an update request through the network to itself.</p>
+<p>This avoids the <code>Replica.unicast</code> self-send guard. Algorithms must not assume self-unicast will deliver.</p>
+<h2>7. Client timeout semantics</h2>
+<p>The client’s write timer covers the whole operation: contacted replica processing, coordinator forwarding, quorum exchange, completion return, and possibly recovery.</p>
+<p>If the timer fires, C reports <code>WriteTimeout</code>. This does not undo update work. A partially completed update may be recovered later. The client API has no query transaction to resolve an uncertain timeout.</p>
+<p>The timeout branch should cancel or otherwise invalidate any success path so only one callback appears. Late <code>WriteResultMsg</code> is discarded once the client advances to another ID.</p>
+<h2>8. Crash cases by layer</h2>
+<ul>
+<li><strong>Contacted replica crashes before receiving <code>WriteMsg</code>:</strong> no child update exists; client times out.</li>
+<li><strong>Contacted replica crashes after forwarding:</strong> update may continue, but the client may not receive the result because the parent owner is dead.</li>
+<li><strong>Coordinator crashes before <code>UPDATE</code>:</strong> initiating replica’s child update timeout should trigger election/retry.</li>
+<li><strong>Coordinator crashes after quorum:</strong> recovery must preserve uniform agreement; client outcome may still be uncertain.</li>
+<li><strong>Client times out while replicas continue:</strong> distributed correctness and client-observed success are different properties.</li>
+</ul>
+<h2>9. Current implementation status</h2>
+<p>The standalone write branch tests the wrapper by manually scheduling <code>WriteFinishMsg</code> at the replica. That proves request/result/timeout plumbing but does not prove a real update occurred.</p>
+<p>The update branch wires child creation into replica-owned <code>WriteTransaction</code>, but it remains partial. The current election branch regressed to a TODO at that exact integration point because the update feature has not been merged there.</p>
+<p>Therefore documentation must not say “WriteTransaction implements quorum broadcast.” It delegates quorum broadcast to another subsystem.</p>
+<h2>10. Tests and missing cases</h2>
+<p>Existing wrapper tests cover:</p>
+<ul>
+<li>result conversion after an injected finish message; and</li>
+<li>timeout when the contacted replica is crashed.</li>
+</ul>
+<p>Needed integrated cases include:</p>
+<ul>
+<li>child update really applies the value before finish;</li>
+<li>follower and coordinator contact paths;</li>
+<li>separate parent/child ID routing;</li>
+<li>crash after forwarding but before returning result;</li>
+<li>multiple queued client writes;</li>
+<li>late finish after client timeout; and</li>
+<li>the result’s <code>replicaId</code> meaning the contacted replica, not necessarily coordinator.</li>
+</ul>
+<h2>11. Code map</h2>
+<ul>
+<li><code>AbstractClient.WriteRequest</code>: public request.</li>
+<li><code>Client.sendWrite</code>: creates the client parent.</li>
+<li><code>Replica.onWriteMsg</code>: creates the replica parent.</li>
+<li><code>WriteTransaction.start</code>: chooses client or replica role.</li>
+<li><code>UpdateTransaction(..., writeTid)</code>: child link on update branch.</li>
+<li><code>WriteFinishMsg</code>: child-to-parent local completion.</li>
+<li><code>WriteResultMsg</code>: replica-to-client completion.</li>
+<li><code>TestWriteTransaction</code>: wrapper-level tests.</li>
+</ul>
+<h2>12. Exam rehearsal</h2>
+<p><strong>Why not use one transaction object from client through every replica?</strong> Objects are actor-local mutable FSMs. Messages cross actor boundaries; each actor owns its own transaction instance.</p>
+<p><strong>What does <code>WriteFinishMsg</code> prove?</strong> Only that the child says the replica-side write may finish. Correctness depends on sending it after valid local update completion.</p>
+<p>The invariant to remember is: <strong>the client-facing parent completes only after its separately identified child update reports completion, and correlation returns through the original parent ID.</strong></p>
+<h2>13. Why the write wrapper has two levels</h2>
+<pre class="diagram">Client
+  |
+  +--> WriteTransaction (parent, client-owned)
+          |
+          +--> UpdateTransaction (child, replica/coordinator-owned)
+                         |
+                  quorum + WRITEOK
+                         |
+          WriteFinishMsg (child -> parent)
+          WriteResultMsg (parent -> client)</pre>
+<p>The parent gives the client a stable lifecycle: one timeout and one final
+callback. The child speaks the replica protocol and may need many network
+messages. Keeping them separate prevents a network ACK from being mistaken for
+a client result.</p>
+<h2>14. Code microscope: correlation across an actor boundary</h2>
+<p>At parent start, the code should create a fresh child ID and retain a mapping
+from child to parent. The child must include enough metadata in
+<code>WriteFinishMsg</code> for the parent to verify that it is the expected child. The
+parent then sends <code>WriteResultMsg</code> using the original client-facing ID.</p>
+<pre class="code-microscope">// Conceptual correlation table
+parentId = (clientRef, 41)
+childId  = (coordinatorRef, 8)
+children.put(childId, parentId)
+
+onWriteFinish(msg):
+    if (!children.containsKey(msg.childId())) return; // stale/foreign
+    completeClient(children.remove(msg.childId()), msg.value())</pre>
+<p>Do not infer that two IDs are equal because they represent one logical write.
+They live in different actor namespaces. This is the same identity lesson as
+<code>TransactionId</code> versus <code>EpochPair</code>, now applied to a parent/child boundary.</p>
+<h2>15. Timeout races and honest outcomes</h2>
+<p>There are at least three completion races: child success before parent timeout,
+parent timeout before child success, and child failure while the timer is being
+cancelled. A robust wrapper makes completion idempotent. After the parent has
+entered <code>DONE</code> or <code>TIMEOUT</code>, a late <code>WriteFinishMsg</code> is ignored and cannot call
+the application callback a second time.</p>
+<p>The standalone write branch’s tests that inject <code>WriteFinishMsg</code> are useful,
+but they do not prove that a real <code>UpdateTransaction</code> reached a quorum. Treat
+them as wrapper tests and pair them with integration tests for the child.</p>
+<h3>Practice</h3>
+<p>Draw the three races above and label which actor owns each timer. Then explain
+why a client retry needs an idempotency key if the first child may have already
+committed after the parent timed out.</p>
+</body>
+</html>
