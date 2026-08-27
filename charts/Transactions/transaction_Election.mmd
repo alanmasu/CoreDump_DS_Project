@@ -1,46 +1,69 @@
 ---
+title: ElectionTransaction healthy-ring sequence
 config:
   theme: forest
 ---
+
 sequenceDiagram
-    participant M as Master
+    participant S as Akka Scheduler
+    participant R1 as Replica 1 (crashed coordinator)
+    participant R2 as Replica 2
+    participant R3 as Replica 3
+    participant R4 as Replica 4
 
-    actor C1 as Client1
-    %% actor C2 as Client2
-    participant R1 as Replica1(coordinator)
-    participant R2 as Replica2
-    participant R3 as Replica3
-    participant R4 as Replica4
+    Note over R2,R4: Logical ring: R2 -> R3 -> R4 -> R2
 
-    rect rgba(0, 255, 0, 0.3)
-        R1 --x R3: HeartbeatMsg()
-        note over R3: Notes that Replica1 has crashed
-
-        note over R3: Transaction ELECTION init on R3 having <2,4>
-        R3 ->> R4: ElectionMsg((3,<2,4>))
-        note over R3: Timeout for ACK Msg starts
-
-        note over R4: Transaction ELECTION init on R4 having <2,5>
-        R4 ->> R3: ElectionAck()
-        R4 ->> R2: ElectionMsg((3,<2,4>), (4,<2,5>))
-        note over R4: Timeout for ACK Msg starts
-    
-        note over R2: Transaction ELECTION init on R2 having <2,3>
-        R2 ->> R4: ElectionAck()
-        R2 ->> R3: ElectionMsg((3,<2,4>), (4,<2,5>), (2,<2,3>))
-        note over R2: Timeout for ACK Msg starts
-
-
-        R3 ->> R2: ElectionAck()
-        R3 ->> R4: ElectionMsg((3,<2,4>), (4,<2,5>), (2,<2,3>))
-        note over R3: Timeout for ACK Msg starts
-
-        R4 ->> R3: ElectionAck()
-        note over R4: R4 notices that is the new coordinator
-        R4 ->> R2: SynchronizationMsg(epoch, 0)
-        R4 ->> R3: SynchronizationMsg(epoch, 0)
-        
+    rect rgba(255, 200, 0, 0.25)
+        Note over R1: R1 crashes and sends no more heartbeats
+        S ->> R3: WatchdogExpiredMsg(version)
+        Note over R2,R4: Each surviving replica schedules a ring-priority election start.<br/>A received election token cancels a later pending start.
+        S ->> R3: ElectionStartMsg after priority delay
+        Note right of R3: Heartbeat FSM enters ELECTION_REQUESTED<br/>Create ElectionTransaction<br/>Candidate R3=pair(2,4)
     end
-    
 
+    rect rgba(0, 255, 0, 0.20)
+        R3 ->> R4: ElectionMsg(failedCoordinator=R1, {R3=pair(2,4)})
+        R3 ->> S: schedule round-trip ElectionAckTimeout
+        Note right of R3: WAITING_FOR_ACK
 
+        Note right of R4: Create local ElectionTransaction<br/>Add candidate R4=pair(2,5)
+        R4 ->> R2: ElectionMsg(failedCoordinator=R1, {R3=pair(2,4), R4=pair(2,5)})
+        R4 ->> R3: ElectionAckMsg()
+        R4 ->> S: schedule round-trip ElectionAckTimeout
+        Note right of R4: WAITING_FOR_ACK
+
+        Note right of R3: Cancel timeout<br/>WAITING_FOR_TOKEN
+
+        Note right of R2: Create local ElectionTransaction<br/>Add candidate R2=pair(2,3)
+        R2 ->> R3: ElectionMsg(failedCoordinator=R1, {R2=pair(2,3), R3=pair(2,4), R4=pair(2,5)})
+        R2 ->> R4: ElectionAckMsg()
+        R2 ->> S: schedule round-trip ElectionAckTimeout
+        Note right of R2: WAITING_FOR_ACK
+
+        Note right of R4: Cancel timeout<br/>WAITING_FOR_TOKEN
+
+        Note right of R3: Candidate already present<br/>Local replica is not winner
+        R3 ->> R4: ElectionMsg(failedCoordinator=R1, {R2=pair(2,3), R3=pair(2,4), R4=pair(2,5)})
+        R3 ->> R2: ElectionAckMsg()
+        R3 ->> S: schedule round-trip ElectionAckTimeout
+        Note right of R3: WAITING_FOR_ACK
+
+        Note right of R2: Cancel timeout<br/>WAITING_FOR_TOKEN
+
+        R4 ->> R3: ElectionAckMsg()
+        Note right of R4: Candidate already present<br/>Token completed the ring
+        Note right of R4: R4 has newest pair(2,5)<br/>State = ELECTED
+        Note right of R3: Cancel timeout<br/>WAITING_FOR_TOKEN
+    end
+
+    rect rgba(0, 150, 255, 0.20)
+        Note right of R4: Install coordinator R4 with new epoch 3:0<br/>Broadcast authoritative positions snapshot
+        R4 ->> R2: SynchronizationMsg(failedCoordinator=R1, coordinator=R4, epoch=3:0, positions)
+        R4 ->> R3: SynchronizationMsg(failedCoordinator=R1, coordinator=R4, epoch=3:0, positions)
+        Note right of R4: SYNCHRONIZING
+
+        Note right of R2: Validate sender and newer epoch<br/>Apply positions snapshot<br/>Install R4 and epoch 3:0<br/>DONE
+        Note right of R3: Validate sender and newer epoch<br/>Apply positions snapshot<br/>Install R4 and epoch 3:0<br/>DONE
+
+        Note right of R4: Synchronization completed<br/>DONE<br/>Start heartbeat and resume writes
+    end
