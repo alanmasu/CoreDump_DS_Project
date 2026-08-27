@@ -108,6 +108,18 @@ class TestUpdateTransaction {
     void testUpdateCoordinatorCrash() {
         sys.actors.get(coordinatorId).tell(CRASH_NOW, ActorRef.noSender());
         sys.probes.get(coordinatorId).expectMsgClass(Crash.class);
-        assertWriteTimedOut();
+        if (replica.equals(sys.actors.get(coordinatorId))) {
+            // The contacted replica itself is crashed, so it cannot accept the request.
+            assertWriteTimedOut();
+            return;
+        }
+
+        // A live follower can retain the request, elect a coordinator, and safely
+        // retry because the failed coordinator never sent UPDATE for this write.
+        startWriteTransaction(0, 42);
+        WriteResult writeResult = clientProbe.expectMsgClass(getClientWriteTimeout(), WriteResult.class);
+        assertEquals(0, writeResult.index);
+        assertEquals(42, writeResult.value);
+        assertEquals(true, writeResult.success);
     }
 }

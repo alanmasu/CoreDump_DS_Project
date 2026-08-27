@@ -1,4 +1,7 @@
 # Distributed Systems Project 2026
+
+The sequential-consistency contract, implementation invariants, crash-recovery argument, assumptions, and verification evidence are documented in [the sequential consistency audit](docs/sequential-consistency-report.md).
+
 ![Java](https://img.shields.io/badge/Java-ED8B00?style=flat-square&logo=java&logoColor=white)
 ![Akka](https://img.shields.io/badge/Akka-15A9CE?style=flat-square&logo=akka&logoColor=white)
 ![Gradle](https://img.shields.io/badge/Gradle-Build-02303A?style=flat-square&logo=gradle&logoColor=white)

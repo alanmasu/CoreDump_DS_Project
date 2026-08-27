@@ -17,7 +17,7 @@ sequenceDiagram
         rect rgb(243, 111, 111)
             note over C1: C1 Start a WriteTransaction<C1, 0>
             C1 ->> R2: WriteMsg(idx, val, Client1, <C1, 0>)
-            note over R2: R2 Start a WriteTransaction<C1, 0> 
+            note over R2: R2 Start a WriteTransaction<C1, 0>
             note over R2: R2 Start a UpdateTransaction<R2, 0>
         end
         rect rgb(243, 241, 111)
