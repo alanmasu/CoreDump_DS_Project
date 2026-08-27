@@ -176,7 +176,8 @@ public class UpdateTransaction extends Transaction {
         replica.debug("Forwarding UpdateTransaction " + this.getId() + " to coordinator | index: " + this.index
                 + " value: " + this.value);
         this.state = UpdateTransactionState.WAITING_UPDATE;
-        UpdateMsg updateMsg = new UpdateMsg(this.getId(), null, replica.getSelf(), this.index, this.value);
+        UpdateMsg updateMsg =
+                new UpdateMsg(this.getId(), this.startEpochPair, replica.getSelf(), this.index, this.value);
         replica.unicast(updateMsg, this.destination.get());
         this.timeout = replica.scheduleToItself(
                 replica.getMaxLatency() * 3,

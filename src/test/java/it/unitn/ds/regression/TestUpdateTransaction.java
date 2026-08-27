@@ -57,8 +57,9 @@ class TestUpdateTransaction {
                 AbstractReplica.MIN_LATENCY,
                 AbstractReplica.MAX_LATENCY,
                 HEARTBEAT_INTERVAL);
-        clientProbe = new TestKit(sys.system);
+        replicaProbe = sys.probes.get(replicaId);
         replica = sys.actors.get(replicaId);
+        clientProbe = new TestKit(sys.system);
         client = sys.system.actorOf(
                 Client.propsWithListener(
                         sys.client_read_timeout, sys.client_write_timeout, Optional.empty(), clientProbe.getRef()),
@@ -99,12 +100,14 @@ class TestUpdateTransaction {
     @Test
     void testUpdateReplicaCrash() {
         replica.tell(CRASH_NOW, ActorRef.noSender());
+        replicaProbe.expectMsgClass(Crash.class);
         assertWriteTimedOut();
     }
 
     @Test
     void testUpdateCoordinatorCrash() {
         sys.actors.get(coordinatorId).tell(CRASH_NOW, ActorRef.noSender());
+        sys.probes.get(coordinatorId).expectMsgClass(Crash.class);
         assertWriteTimedOut();
     }
 }
