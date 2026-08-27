@@ -203,3 +203,184 @@ Sketch the fields that belong to the actor (mailbox-owned mutable state) and
 the fields that belong to a transaction (protocol-local state). Then explain
 why sharing one mutable transaction object between two replica actors would
 break the actor model even if Java allowed the reference to be passed.
+
+<div class="page-break"></div>
+
+## 15. Deep study plate: actor topology and ownership
+
+```mermaid
+flowchart TB
+    System[ActorSystem] --> C1[Client actor]
+    System --> R0[Replica 0 coordinator]
+    System --> R1[Replica 1 follower]
+    System --> R2[Replica 2 follower]
+    C1 -->|client request| R1
+    R0 <-->|NetworkChannel| R1
+    R1 <-->|NetworkChannel| R2
+    R0 --> L[Test listener]
+    R1 --> L
+    R2 --> L
+```
+
+Every rectangle is an independent mailbox and state boundary. The `ActorRef`
+is a safe address, not a direct Java reference for calling methods on the
+actor. A sender constructs an immutable message and uses `tell`; the receiver
+later handles it on its own actor thread. The transaction objects inside R0
+cannot be read or modified by R1. This isolation is the reason mutable FSMs can
+be ordinary objects: only their owning actor calls them.
+
+When studying a field, ask who owns it. Membership, coordinator reference,
+positions, history, crash status, and `activeTransactions` belong to a replica.
+An ACK set, FSM state, timeout handle, and attempt number belong to one
+transaction. A static mutable collection would escape both boundaries and
+should immediately attract attention in a review.
+
+<div class="page-break"></div>
+
+## 16. Deep study plate: initialization happens by message
+
+```mermaid
+sequenceDiagram
+    participant M as Main or test fixture
+    participant S as ActorSystem
+    participant R0 as Replica 0
+    participant R1 as Replica 1
+    M->>S: actorOf Props for every replica
+    S-->>M: ActorRefs
+    M->>R0: InitSystem(all members, coordinator)
+    M->>R1: InitSystem(all members, coordinator)
+    R0->>R0: initialize actor-owned state
+    R1->>R1: initialize actor-owned state
+    R0->>R0: start coordinator heartbeat role
+    R1->>R1: start follower watchdog role
+```
+
+This two-phase construction solves a circular dependency: the membership map
+cannot be complete until all `ActorRef`s exist. Constructors therefore capture
+fixed configuration, while `InitSystem` supplies the completed graph. Students
+should distinguish Java object construction from protocol readiness. A field
+being non-null after the constructor does not mean the replica knows its ring
+neighbor, current coordinator, or heartbeat role.
+
+Inspect handlers that may run before initialization. A clear design either
+guarantees ordering in the fixture, stashes early protocol messages, or rejects
+them with an explicit reason. Processing an election token with an empty member
+map is worse than delaying it because it may generate a structurally invalid
+ring traversal.
+
+<div class="page-break"></div>
+
+## 17. Deep study plate: two-stage dispatch
+
+```mermaid
+flowchart TD
+    Mail[Mailbox event] --> Guard{Replica crashed?}
+    Guard -->|yes| Drop[Ignore according to crash model]
+    Guard -->|no| Entry{Special entry message?}
+    Entry -->|Init/client/crash| Handler[Actor-level handler]
+    Entry -->|Protocol Msg| Lookup[Lookup TransactionId]
+    Lookup --> Found{FSM found?}
+    Found -->|no| Stale[Drop unknown or completed traffic]
+    Found -->|yes| FSM[Transaction state/sender/epoch checks]
+    FSM --> Effect[State change, send, timer, or callback]
+```
+
+Actor-level dispatch answers “which local component owns this event?” The FSM
+then answers “is it valid now?” The second question cannot be skipped. A valid
+transaction ID on an ACK does not prove the sender is a participant, and a
+valid watchdog ID does not prove its version is current. This layered checking
+is the recurring pattern across heartbeat, update, and election.
+
+Trace one message in the debugger by recording its runtime class, sender,
+transaction ID, destination actor, active FSM state, and resulting effect. If
+you cannot fill one column, you have located a hidden assumption worth
+documenting or testing.
+
+<div class="page-break"></div>
+
+## 18. Deep study plate: actor turn versus distributed atomicity
+
+```mermaid
+sequenceDiagram
+    participant A as Replica A mailbox
+    participant B as Replica B mailbox
+    participant C as Replica C mailbox
+    A->>A: handle UPDATE completely
+    par independent actor turns
+        B->>B: handle heartbeat
+    and
+        C->>C: handle client read
+    end
+    A-->>B: delayed ACK
+```
+
+Akka guarantees one handler at a time inside A, but B and C execute
+independently. Therefore, assigning a field and sending a message inside one A
+handler is locally ordered, not globally atomic. C may serve a read between
+A's local update and B's ACK. Protocol states and epochs make those
+interleavings safe; actor serialization alone cannot.
+
+This distinction is a common exam trap. “Actors avoid races” is too broad.
+Actors avoid unsynchronized concurrent access to one actor's encapsulated
+fields. They do not avoid races between messages, timeouts, or decisions made
+by different actors. Distributed algorithms are largely about controlling
+those remaining races.
+
+<div class="page-break"></div>
+
+## 19. Deep study plate: simulated crash lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> NONE
+    NONE --> PENDING: configured crash point requested
+    PENDING --> CRASHED: matching event occurs
+    CRASHED --> CRASHED: later messages ignored
+```
+
+The actor process remains addressable after a simulated crash so tests can use
+stable `ActorRef`s. “Crashed” is therefore a semantic state enforced by guards,
+not Akka termination. Every entry path—including timers and self-messages—must
+observe it. A forgotten handler can resurrect protocol output even though
+ordinary network messages are blocked.
+
+For a code audit, enumerate the receive builder's message types and mark the
+crash guard for each. Then enumerate direct transaction calls made from actor
+methods. This creates a concrete completeness argument rather than relying on
+one top-level boolean.
+
+<div class="page-break"></div>
+
+## 20. Student workbook and oral-exam prompts
+
+```mermaid
+mindmap
+  root((Actor architecture))
+    Construction
+      Props
+      ActorSystem
+      InitSystem
+    Ownership
+      Actor fields
+      Transaction fields
+      Immutable messages
+    Dispatch
+      Actor-level entry
+      TransactionId lookup
+      FSM validation
+    Concurrency
+      One mailbox turn
+      Many actors concurrently
+```
+
+Explain the architecture without using the word “thread” until the end. Start
+with ownership and messages. Next, draw the initialization sequence and show
+why the member map cannot be passed completely to the first replica's
+constructor. Finally, take an ACK and explain both dispatch stages.
+
+Practical exercises: add a test for a protocol message before initialization;
+add a test for a correct ID but wrong sender; and add a crash test in which a
+queued timer arrives after the state becomes `CRASHED`. For each test, state
+the expected absence of side effects as well as the expected message. A good
+answer names what must not change: position, history, active transaction count,
+or listener callback count.

@@ -288,3 +288,139 @@ configured channel delay plus protocol hops and explain the margin.
 Choose one claim from each of the read, heartbeat, election, and recovery
 reports. For each, write what a unit test can establish and what integration or
 formal reasoning is still needed.
+
+<div class="page-break"></div>
+
+## 20. Deep study plate: evidence ladder
+
+```mermaid
+flowchart TB
+    Reason[Reasoned invariant] --> Unit[Focused unit/FSM test]
+    Unit --> Integration[Multi-actor integration test]
+    Integration --> Regression[Required regression scenario]
+    Regression --> CI[Exact-commit CI evidence]
+    CI --> Claim[Qualified report claim]
+```
+
+Higher rungs add scope but do not replace reasoning. A green regression can
+miss an unasserted property; a formal invariant can be implemented incorrectly.
+Strong documentation names both mechanism and observation, plus the commit and
+environment on which evidence was collected.
+
+Do not turn an environment failure before compilation into a passing test. The
+native-platform Gradle error, for example, means test execution was blocked.
+
+<div class="page-break"></div>
+
+## 21. Deep study plate: read a test backwards
+
+```mermaid
+flowchart BT
+    Assert[Final probe assertion] --> Callback[Who emitted callback?]
+    Callback --> Transition[Which FSM transition?]
+    Transition --> Trigger[Which message or timeout?]
+    Trigger --> Fixture[Which actors, delays, and crashes?]
+    Fixture --> Scope[What property remains untested?]
+```
+
+Starting at the assertion prevents test names from substituting for evidence.
+Open helpers in `TestsCommons` to see membership size, coordinator choice, delay
+bounds, and initialization. Then check negative assertions and callback counts.
+
+A test expecting one message proves presence. To prove exactly once, it also
+needs a bounded absence check after duplicate or late inputs.
+
+<div class="page-break"></div>
+
+## 22. Deep study plate: deterministic protocol tests
+
+```mermaid
+sequenceDiagram
+    participant T as Test probe
+    participant A as Actor under test
+    T->>A: initialize known state
+    T->>A: inject protocol event
+    A-->>T: observable callback/message
+    T->>A: inject duplicate/stale event
+    Note over T: expect no second callback
+```
+
+Prefer injected events and TestKit expectations to arbitrary sleep. If time is
+the behavior under test, derive the expectation window from channel and timer
+configuration. Keep random delay deterministic through a seed or bounded
+fixture when debugging failures.
+
+Record both state and output where possible. A callback without a changed
+position may reveal a false-success path.
+
+<div class="page-break"></div>
+
+## 23. Deep study plate: build and static analysis
+
+```mermaid
+flowchart LR
+    Compile[compile] --> Unit[unit tests]
+    Unit --> Regression[regression tests]
+    Regression --> Contract[callback contract]
+    Contract --> SCA[PMD SpotBugs CPD]
+    SCA --> Coverage[JaCoCo evidence]
+```
+
+Each task answers a different question. Compilation checks types; regression
+checks configured scenarios; callback contract checks reachability of required
+observations; static tools identify patterns; coverage identifies executed code
+but not correctness. Report their results separately.
+
+Tie CI evidence to an exact commit. A passing earlier head does not certify a
+later change, and an in-progress remote job is not a pass.
+
+<div class="page-break"></div>
+
+## 24. Deep study plate: coverage by subsystem
+
+```mermaid
+flowchart TD
+    Sources[Maintained source inventory] --> Actor[actor/init tests]
+    Sources --> Channel[channel/FIFO tests]
+    Sources --> Client[client/read/write tests]
+    Sources --> Update[quorum/update tests]
+    Sources --> Failure[heartbeat/crash/election tests]
+    Sources --> Recovery[synchronization tests]
+    Sources --> Docs[diagram/provenance review]
+```
+
+File coverage is not line coverage. The map ensures every maintained area has
+a report and verification discussion. Within each area, trace branches for
+success, timeout, malformed input, duplicate traffic, crash state, and stale
+events.
+
+Generated build outputs are evidence artifacts, not maintained source. Keep
+them out of conceptual coverage counts unless a report cites a specific result.
+
+<div class="page-break"></div>
+
+## 25. Student workbook: build an evidence table
+
+```mermaid
+mindmap
+  root((Evidence table))
+    Claim
+      exact wording
+      safety or liveness
+    Mechanism
+      class and method
+      guard/state transition
+    Test
+      fixture
+      assertion
+      negative assertion
+    Limits
+      branch split
+      untested interleaving
+      environment block
+```
+
+Create one row for every major claim in the other fourteen reports. If a row
+lacks a mechanism, weaken the claim. If it lacks a test, label it reasoned or
+pending. If the code exists only on a feature branch, preserve that provenance
+instead of presenting an integrated pass.

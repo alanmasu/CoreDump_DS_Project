@@ -385,5 +385,59 @@ the entire Java source.</p>
 coordinator crash, election, synchronization, then client read. Include one
 duplicate ACK and one stale watchdog. State exactly why each is ignored or
 accepted.</p>
+<div class="page-break"></div>
+<h2>22. Deep study plate: construct a sequential history</h2>
+<div class="mermaid-image"><img src="mermaid/14_end_to_end_correctness_and_corner_cases-01.png" alt="Rendered Mermaid diagram 1" /></div>
+<p>Sequential consistency requires a single order containing all operations while
+preserving each client’s program order. It does not require that this order
+match wall-clock completion across different clients. To analyze a trace, draw
+per-client edges first, then add write-order edges from committed epoch pairs,
+then place reads after the writes whose values they return.</p>
+<p>If these edges form a cycle, no legal sequential history exists. This graph
+method is clearer than arguing from timestamps.</p>
+<div class="page-break"></div>
+<h2>23. Deep study plate: end-to-end healthy write</h2>
+<div class="mermaid-image"><img src="mermaid/14_end_to_end_correctness_and_corner_cases-02.png" alt="Rendered Mermaid diagram 2" /></div>
+<p>Every subsystem contributes: client order, parent-child correlation, channel
+FIFO, coordinator sequencing, quorum evidence, materialization, and callback.
+A local bug at any boundary can invalidate the global claim even when the other
+FSMs are correct.</p>
+<p>Use this trace as the baseline before injecting one perturbation. Changing one
+factor at a time makes failure reasoning teachable.</p>
+<div class="page-break"></div>
+<h2>24. Deep study plate: crash after partial visibility</h2>
+<div class="mermaid-image"><img src="mermaid/14_end_to_end_correctness_and_corner_cases-03.png" alt="Rendered Mermaid diagram 3" /></div>
+<p>This is the central uniform-agreement scenario. Numeric leader election alone
+is insufficient because the winner must carry or obtain 7:4. Snapshot-only
+recovery may converge current arrays but needs justification that it preserves
+identity, ordering, and pending evidence.</p>
+<p>Client timeout does not remove this obligation; visibility at R1 already made
+it a system safety issue.</p>
+<div class="page-break"></div>
+<h2>25. Deep study plate: stale traffic after term change</h2>
+<div class="mermaid-image"><img src="mermaid/14_end_to_end_correctness_and_corner_cases-04.png" alt="Rendered Mermaid diagram 4" /></div>
+<p>FIFO cannot solve these events because local timers and different senders are
+outside one channel order. Consumption-time validation is the common defense.
+Every message type needs an explicit stale policy; omission is a likely
+integration bug.</p>
+<p>Tests should deliver old events after synchronization rather than only checking
+that old timers were cancelled.</p>
+<div class="page-break"></div>
+<h2>26. Deep study plate: safety and liveness dependency graph</h2>
+<div class="mermaid-image"><img src="mermaid/14_end_to_end_correctness_and_corner_cases-05.png" alt="Rendered Mermaid diagram 5" /></div>
+<p>Safety depends on both normal and recovery paths. Liveness depends on timers,
+surviving majority, ring progress, and barrier release. A timeout may stop one
+client request while the system-level recovery continues; describe these
+progress scopes separately.</p>
+<p>The current split branches provide mechanisms along the graph but are not one
+verified integrated proof. Keep that limitation prominent in the eventual exam
+report.</p>
+<div class="page-break"></div>
+<h2>27. Student workbook: adversarial trace method</h2>
+<div class="mermaid-image"><img src="mermaid/14_end_to_end_correctness_and_corner_cases-06.png" alt="Rendered Mermaid diagram 6" /></div>
+<p>Choose one item from each branch and build a complete message table with actor,
+sender, transaction ID, epoch, FSM state, and visible array. At each row state
+why the event is accepted or rejected. End with one proposed sequential history
+and the evidence that every correct replica can eventually reach it.</p>
 </body>
 </html>

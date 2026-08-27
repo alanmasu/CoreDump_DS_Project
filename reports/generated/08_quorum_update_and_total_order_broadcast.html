@@ -340,5 +340,64 @@ orders for the same logical history.</p>
 <p>For three, five, and six replicas, calculate the strict-majority threshold and
 the maximum number of failures tolerated before progress stops. Then write a
 test that delivers duplicate ACKs from one sender and proves they count once.</p>
+<div class="page-break"></div>
+<h2>16. Deep study plate: coordinator sequencing</h2>
+<div class="mermaid-image"><img src="mermaid/08_quorum_update_and_total_order_broadcast-01.png" alt="Rendered Mermaid diagram 1" /></div>
+<p>Only the active coordinator term may assign the next pair. Concurrent client
+writes therefore need serialization or an explicit rule that reserves unique
+sequence numbers before their broadcasts overlap. A mutable “current pair”
+shared by several coordinator FSMs can make ACKs or WRITEOKs refer to the wrong
+payload.</p>
+<p>Read coordinator code with a ledger: assigned pair, payload, ACK sender set,
+state, and timeout attempt. Every handler should mutate one row of that ledger,
+not a global field whose meaning changes when another update starts.</p>
+<div class="page-break"></div>
+<h2>17. Deep study plate: strict-majority intersection</h2>
+<div class="mermaid-image"><img src="mermaid/08_quorum_update_and_total_order_broadcast-02.png" alt="Rendered Mermaid diagram 2" /></div>
+<p>With five replicas, any two sets of three intersect. This mathematical fact
+supports recovery only if ACK knowledge is actually retained and election can
+prefer a candidate carrying it. Counting three messages is not enough when one
+sender can appear twice. Use a set keyed by stable replica identity and validate
+membership before insertion.</p>
+<p>For six replicas, the threshold is four; sets of three are not a strict
+majority. Write the formula <code>floor(N/2)+1</code> and calculate it rather than relying
+on a constant tailored to five-node tests.</p>
+<div class="page-break"></div>
+<h2>18. Deep study plate: participant validation</h2>
+<div class="mermaid-image"><img src="mermaid/08_quorum_update_and_total_order_broadcast-03.png" alt="Rendered Mermaid diagram 3" /></div>
+<p>Participant ACK is a promise that it can help recover this proposal. It should
+not acknowledge an invalid index, null pair, stale term, or conflicting payload.
+Sender validation ties sequencing authority to the installed coordinator.</p>
+<p>When UPDATE is retransmitted with the same pair and payload, idempotent ACK may
+be appropriate. The same pair with a different value is a protocol violation,
+not a newer update. Tests should distinguish these cases.</p>
+<div class="page-break"></div>
+<h2>19. Deep study plate: WRITEOK materialization</h2>
+<div class="mermaid-image"><img src="mermaid/08_quorum_update_and_total_order_broadcast-04.png" alt="Rendered Mermaid diagram 4" /></div>
+<p>The inspected update branch’s termination path must be checked for the actual
+<code>setPosition</code> call. Advancing an epoch, appending history, and emitting a
+callback without changing materialized state creates a false success: the next
+read returns the old value.</p>
+<p>Commit identity also makes duplicate WRITEOK harmless. If the pair is already
+committed, do not apply, advance, or callback again. Validate that the stored
+payload belongs to the pair rather than trusting fields in a mutable FSM.</p>
+<div class="page-break"></div>
+<h2>20. Deep study plate: coordinator crash windows</h2>
+<div class="mermaid-image"><img src="mermaid/08_quorum_update_and_total_order_broadcast-05.png" alt="Rendered Mermaid diagram 5" /></div>
+<p>The recovery obligation grows across these windows. Once a correct replica has
+applied, losing the update violates uniform agreement. Before visibility, the
+protocol may have more freedom, but it must still avoid reusing the pair or
+producing contradictory callbacks.</p>
+<p>Tests should inject the crash at named transitions, not approximate them with
+sleep. Listener callbacks and controlled message injection make the window
+observable.</p>
+<div class="page-break"></div>
+<h2>21. Student workbook: prove one update</h2>
+<div class="mermaid-image"><img src="mermaid/08_quorum_update_and_total_order_broadcast-06.png" alt="Rendered Mermaid diagram 6" /></div>
+<p>Build a five-replica trace including duplicate ACK, delayed ACK after commit,
+duplicate WRITEOK, and one crashed follower. For every event, write the ACK set,
+FSM state, pair, and visible arrays. The exercise is complete only when you can
+explain why each ignored message is harmless and why the surviving majority
+still makes progress.</p>
 </body>
 </html>

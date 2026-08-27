@@ -229,3 +229,154 @@ which null is legal and the guard that prevents earlier use.
 Construct two histories that produce the same final `positions[]` array but
 have different update order. Explain why a recovery algorithm that copies only
 the array cannot distinguish them, then name the metadata it should transfer.
+
+<div class="page-break"></div>
+
+## 17. Deep study plate: four views of replica state
+
+```mermaid
+flowchart TB
+    Protocol[Protocol control state] --> Ordering[Epoch and sequence state]
+    Ordering --> Materialized[positions array]
+    Ordering --> Evidence[observed and committed history]
+    Evidence --> Recovery[recovery decisions]
+    Recovery --> Materialized
+```
+
+Protocol control state says whether the replica is a coordinator, follower,
+electing, or synchronizing. Ordering state assigns meaning to update IDs.
+Materialized state answers current reads. History explains how the replica
+reached that materialized value and which incomplete work it observed. Debugging
+only the array hides the evidence needed for recovery.
+
+Write each layer separately in a trace. A follower may have observed pair 3:7
+without applying it, so its history knowledge is newer than its visible array.
+That is not automatically an inconsistency; it is an intermediate protocol
+state that must be resolved by WRITEOK or recovery.
+
+<div class="page-break"></div>
+
+## 18. Deep study plate: lexicographic epoch ordering
+
+```mermaid
+flowchart LR
+    E20[2:0] --> E21[2:1] --> E22[2:2]
+    E22 --> E30[3:0] --> E31[3:1]
+```
+
+Compare term first, then sequence. Pair 3:0 is newer than 2:999 because term 3
+represents a later coordinator generation. Within term 3, only its coordinator
+should assign increasing sequence numbers. This rule gives a total comparison;
+it does not guarantee that all numbers were assigned correctly or that gaps
+are safe.
+
+Document the initial pair. If the field begins null, name the transition that
+creates the first real pair and reject comparison before it. A sentinel such
+as 0:0 simplifies code only if the specification reserves that meaning.
+
+<div class="page-break"></div>
+
+## 19. Deep study plate: observed versus committed
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unknown
+    Unknown --> Observed: UPDATE accepted
+    Observed --> Committed: valid WRITEOK
+    Observed --> RecoveryNeeded: coordinator disappears
+    RecoveryNeeded --> Committed: recovery completes update
+    RecoveryNeeded --> Discarded: protocol proves safe rollback
+```
+
+An observed update is recovery evidence, not necessarily a readable value. A
+committed update has crossed the protocol's visibility boundary. Conflating
+the two lets a follower expose an update that may later be discarded or lets
+recovery erase an update that was already visible somewhere.
+
+History entries should therefore carry status or live in collections whose
+meaning is explicit. A mutable `UpdateTransaction` object is a poor durable
+record because later FSM transitions can rewrite what history appears to say.
+Prefer immutable update records containing pair, index, value, and status.
+
+<div class="page-break"></div>
+
+## 20. Deep study plate: two equal snapshots, different histories
+
+```mermaid
+flowchart TB
+    H1[History A: x=4 then x=9] --> S1[Snapshot x=9]
+    H2[History B: x=9 only] --> S2[Snapshot x=9]
+    S1 --> Same{Snapshots equal}
+    S2 --> Same
+    H1 --> Different[Recovery evidence differs]
+    H2 --> Different
+```
+
+Snapshots collapse history. This is useful for efficient reads but dangerous
+for proving update order. In history A, another replica may have acknowledged
+the first update; in history B, that identity never existed. Copying x=9 makes
+arrays converge yet cannot reconstruct which callbacks, retries, or incomplete
+quorum decisions remain valid.
+
+Snapshot synchronization can still be part of a correct design when paired
+with a checkpoint certificate or a retained suffix of ordered history. The
+inspected code should be described according to what it actually transfers,
+not what a complete recovery protocol might transfer.
+
+<div class="page-break"></div>
+
+## 21. Deep study plate: idempotent materialization
+
+```mermaid
+sequenceDiagram
+    participant R as Replica
+    participant H as History
+    participant P as positions
+    R->>H: receive WRITEOK 4:2
+    H-->>R: not committed yet
+    R->>P: setPosition(index,value)
+    R->>H: mark 4:2 committed
+    R->>H: duplicate WRITEOK 4:2
+    H-->>R: already committed, no second apply
+```
+
+The order of state mutation and history marking must survive duplicate
+delivery and crashes at simulated injection points. Within one actor turn the
+two Java operations are serialized, but the crash model may intentionally stop
+between logical steps. Tests should assert one visible mutation and one
+history entry after duplicate WRITEOK.
+
+If application is simply assigning a value, applying twice looks harmless.
+Do not rely on that accident: callbacks, sequence advancement, and future
+operations may not be idempotent. The protocol should enforce at-most-once by
+identity.
+
+<div class="page-break"></div>
+
+## 22. Student workbook: design a recovery record
+
+```mermaid
+classDiagram
+    class UpdateRecord {
+      +EpochPair pair
+      +int index
+      +int value
+      +Status status
+      +Set~ReplicaId~ acknowledgers
+    }
+    class Status {
+      OBSERVED
+      COMMITTED
+    }
+    UpdateRecord --> Status
+```
+
+Propose an immutable record and justify every field. Decide whether ACK sender
+sets belong in every replica's record or only coordinator recovery evidence.
+Define equality so duplicate messages find the same logical update. Then write
+invariants: one payload per pair, monotonic status, committed records applied
+once, and no newer-term write before required old-term recovery completes.
+
+Finally, compare that design with the inspected branch. Mark implemented
+fields, nullable fields, and missing transitions. This comparison is more
+educational than presenting ideal pseudocode as if it were current behavior.

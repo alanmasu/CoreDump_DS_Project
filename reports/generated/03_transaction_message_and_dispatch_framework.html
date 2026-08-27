@@ -337,5 +337,73 @@ collide.</p>
 <p>Add a test case for an ACK with a valid-looking epoch but the wrong
 <code>TransactionId</code>. Predict which dispatch guard drops it and why accepting it
 would corrupt a different update.</p>
+<div class="page-break"></div>
+<h2>17. Deep study plate: identities form different namespaces</h2>
+<div class="mermaid-image"><img src="mermaid/03_transaction_message_and_dispatch_framework-01.png" alt="Rendered Mermaid diagram 1" /></div>
+<p>The three values refer to one logical operation but answer different questions.
+Parent and child IDs live in actor-owner namespaces; the epoch pair lives in a
+replicated ordering namespace. Reusing one value for all three jobs makes a
+trace look simpler while removing information the dispatchers need.</p>
+<p>Value-object quality matters here. Equality and hashing must use the same
+fields because IDs are keys in collections. <code>toString</code> should expose enough
+information for a log reader to distinguish owner and sequence. Null epoch
+metadata may be legal before sequencing, but every method that compares or
+records it needs a state guard.</p>
+<div class="page-break"></div>
+<h2>18. Deep study plate: message anatomy</h2>
+<div class="mermaid-image"><img src="mermaid/03_transaction_message_and_dispatch_framework-02.png" alt="Rendered Mermaid diagram 2" /></div>
+<p>The base message carries correlation and ordering metadata; concrete messages
+carry the facts needed by one transition. Immutability is important because a
+message may wait in a channel queue while the sender continues processing.
+If the sender later mutates a shared list or transaction object referenced by
+the message, the receiver observes a value that did not exist at send time.</p>
+<p>When examining a constructor, ask whether it defensively copies arrays and
+collections. Actor isolation protects actor fields, not mutable objects placed
+inside messages. This question is especially important for synchronization
+snapshots and update history.</p>
+<div class="page-break"></div>
+<h2>19. Deep study plate: the active-transaction lifecycle</h2>
+<div class="mermaid-image"><img src="mermaid/03_transaction_message_and_dispatch_framework-03.png" alt="Rendered Mermaid diagram 3" /></div>
+<p>Insertion into <code>activeTransactions</code> transfers routing responsibility to the
+owner actor. Removal means no future message should mutate that FSM. Success
+and timeout must converge on one cleanup path so they cannot both remove queue
+entries or emit callbacks. A late message after removal is expected in an
+asynchronous system and should normally be dropped safely.</p>
+<p>Clients typically allow one active request to preserve session order. Replicas
+allow several active FSMs because heartbeat, update, and election can overlap.
+That difference is intentional policy, not inconsistent framework use.</p>
+<div class="page-break"></div>
+<h2>20. Deep study plate: entry messages create conversations</h2>
+<div class="mermaid-image"><img src="mermaid/03_transaction_message_and_dispatch_framework-04.png" alt="Rendered Mermaid diagram 4" /></div>
+<p>Not every message can be routed by lookup because the first message may be the
+reason the local FSM exists. The actor receive layer recognizes those entry
+types, validates them, creates the correct transaction subclass, registers its
+ID, and then starts or dispatches it. Missing an entry handler silently turns a
+valid remote request into an unknown transaction.</p>
+<p>Integration across feature branches is risky here: two branches may each add
+message classes and receive matches. A merge that compiles can still omit one
+match. The coverage map in report 13 should therefore be rechecked against the
+final receive builder.</p>
+<div class="page-break"></div>
+<h2>21. Deep study plate: parent-child completion</h2>
+<div class="mermaid-image"><img src="mermaid/03_transaction_message_and_dispatch_framework-05.png" alt="Rendered Mermaid diagram 5" /></div>
+<p>Correlation translation is explicit state. The contact replica must remember
+which parent waits for which child. A child completion cannot simply reuse its
+own ID as a client result because the client dispatcher knows the parent ID.
+Conversely, routing all child network traffic with the parent ID can collide
+with a different actor’s local numbering.</p>
+<p>Test both directions: a valid child completes exactly one parent, and a foreign
+or already-completed child cannot complete the current parent. Include timeout
+races because cleanup order is where mappings commonly leak.</p>
+<div class="page-break"></div>
+<h2>22. Student workbook: debug one dropped message</h2>
+<div class="mermaid-image"><img src="mermaid/03_transaction_message_and_dispatch_framework-06.png" alt="Rendered Mermaid diagram 6" /></div>
+<p>Use this order because it moves from routing toward protocol semantics. Logging
+only the message class is insufficient; include owner, sequence, epoch, sender,
+receiver, and FSM state. Then reproduce the drop in a focused TestKit test.</p>
+<p>Oral-exam prompts: explain why transaction objects are not actors; explain why
+an epoch pair cannot replace a transaction ID; describe how entry messages
+create an FSM; and show why removal is a correctness event rather than memory
+cleanup alone. A strong answer includes a late-event example for each claim.</p>
 </body>
 </html>

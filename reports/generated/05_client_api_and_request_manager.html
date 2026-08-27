@@ -329,5 +329,66 @@ commit state.</p>
 the active ID at every row and explain which message must be ignored. Then
 design a test that proves the queue advances once when success and timeout are
 delivered in either order.</p>
+<div class="page-break"></div>
+<h2>16. Deep study plate: request queue ownership</h2>
+<div class="mermaid-image"><img src="mermaid/05_client_api_and_request_manager-01.png" alt="Rendered Mermaid diagram 1" /></div>
+<p>The client actor owns both the queue and the active slot. Application calls do
+not synchronously return replicated results; they enqueue work. Starting only
+the head preserves that client’s program order and gives every callback one
+unambiguous context. Multiple clients still run concurrently because each owns
+its own queue.</p>
+<p>Inspect the point where a queued request becomes a transaction. The client must
+assign a fresh ID, select a target, schedule a timeout, and remember enough
+data to produce the typed callback. Those operations should occur in one actor
+turn so a result cannot race an only-partly-installed active context.</p>
+<div class="page-break"></div>
+<h2>17. Deep study plate: success and timeout race</h2>
+<div class="mermaid-image"><img src="mermaid/05_client_api_and_request_manager-02.png" alt="Rendered Mermaid diagram 2" /></div>
+<p>The two terminal events are mutually exclusive by FSM state, not because the
+losing event vanishes. Cleanup must cancel or invalidate the timer, emit one
+callback, clear the active ID, and start the next request once. Centralizing
+those actions reduces double-dequeue bugs.</p>
+<p>Write tests in both orders. Inject success then timeout and timeout then
+success. Assert the exact callback count and the ID of the next started
+transaction. Testing only the happy order misses the core asynchronous race.</p>
+<div class="page-break"></div>
+<h2>18. Deep study plate: client session order</h2>
+<div class="mermaid-image"><img src="mermaid/05_client_api_and_request_manager-03.png" alt="Rendered Mermaid diagram 3" /></div>
+<p>This order supports a read-your-own-write argument when write completion
+actually means the contacted replica has applied the commit. The queue cannot
+repair a premature server callback. Therefore, client ordering and replica
+completion semantics must be proved together.</p>
+<p>A different client may issue a read concurrently and observe a different legal
+point in the global sequential history. Sequential consistency preserves each
+client’s order; it does not require wall-clock real-time order between clients.</p>
+<div class="page-break"></div>
+<h2>19. Deep study plate: target selection and failures</h2>
+<div class="mermaid-image"><img src="mermaid/05_client_api_and_request_manager-04.png" alt="Rendered Mermaid diagram 4" /></div>
+<p>Target selection affects latency and observable state. A read is local to its
+target. A write sent to a follower creates a wrapper that reaches the
+coordinator. Replica-to-replica traffic must use <code>NetworkChannel</code>, while the
+client boundary follows the project’s explicit API path. Mixing these paths
+can accidentally add delay twice or bypass FIFO emulation.</p>
+<p>After target crash, the client may know only that no response arrived. Do not
+invent a rollback result. A timeout is an uncertainty outcome unless the
+protocol provides stronger evidence.</p>
+<div class="page-break"></div>
+<h2>20. Deep study plate: retries need operation identity</h2>
+<div class="mermaid-image"><img src="mermaid/05_client_api_and_request_manager-05.png" alt="Rendered Mermaid diagram 5" /></div>
+<p>Without a stable operation key, the retry looks like a new write. Assignment
+may be harmless for the same value but callbacks and sequence history still
+duplicate. The current reports should not claim exactly-once client semantics
+unless the code stores and recognizes such keys across coordinator change.</p>
+<p>For exam discussion, separate request ID, transaction ID, and update epoch.
+A retry may create a new transaction while retaining a logical operation ID;
+the inspected implementation may not yet model that distinction.</p>
+<div class="page-break"></div>
+<h2>21. Student workbook: client observability</h2>
+<div class="mermaid-image"><img src="mermaid/05_client_api_and_request_manager-06.png" alt="Rendered Mermaid diagram 6" /></div>
+<p>Trace queue contents, active ID, timer generation, and emitted callbacks after
+every event. Add foreign-result, duplicate-result, result-after-timeout, and
+timeout-after-result tests. Explain why silence from the wrong ID is correct
+behavior, while silence from the matching healthy request may be a liveness
+failure.</p>
 </body>
 </html>

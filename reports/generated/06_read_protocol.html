@@ -311,5 +311,63 @@ state if the specification forbids reads from a stale replica.</p>
 <p>Add tests for invalid index, duplicate <code>ReadResultMsg</code>, result-after-timeout,
 and a read sent to a crashed target. For each, state whether the expected
 outcome is a callback, a timeout, or silent stale-message rejection.</p>
+<div class="page-break"></div>
+<h2>16. Deep study plate: complete read path</h2>
+<div class="mermaid-image"><img src="mermaid/06_read_protocol-01.png" alt="Rendered Mermaid diagram 1" /></div>
+<p>The replica obtains the value at handling time. The client owns the timeout
+and externally visible callback. Keeping these responsibilities separate makes
+it clear why a replica cannot complete the next client request and why the
+client cannot safely index replica state directly.</p>
+<p>Record sender and target in a trace. A result with the correct ID but from a
+different replica should be evaluated against the protocol’s sender policy,
+not accepted merely because the value type is correct.</p>
+<div class="page-break"></div>
+<h2>17. Deep study plate: local-read meaning</h2>
+<div class="mermaid-image"><img src="mermaid/06_read_protocol-02.png" alt="Rendered Mermaid diagram 2" /></div>
+<p>Local means no coordinator round trip. It does not mean the value is always
+globally latest. The consistency argument chooses a sequential point compatible
+with the value R2 currently exposes. If R2 is in recovery, the design must say
+whether its state can still be placed in a legal history or whether reads are
+paused until installation completes.</p>
+<p>Avoid calling local reads linearizable. Linearizability adds real-time order;
+the project targets sequential consistency, which preserves program order but
+can place overlapping operations differently.</p>
+<div class="page-break"></div>
+<h2>18. Deep study plate: invalid index boundary</h2>
+<div class="mermaid-image"><img src="mermaid/06_read_protocol-03.png" alt="Rendered Mermaid diagram 3" /></div>
+<p>Input validation belongs immediately before array access. In the inspected read
+branch, a direct indexing path can throw before a controlled protocol outcome.
+That exception is not an acceptable distributed reply: the client may only see
+silence and the actor may restart according to supervision rules outside the
+intended model.</p>
+<p>Tests should cover <code>-1</code>, exactly <code>length</code>, and a very large index. State the
+desired callback contract first; then modify or assess the handler. Validation
+helpers are useful only if every path calls them.</p>
+<div class="page-break"></div>
+<h2>19. Deep study plate: terminal race</h2>
+<div class="mermaid-image"><img src="mermaid/06_read_protocol-04.png" alt="Rendered Mermaid diagram 4" /></div>
+<p>Reverse the order and success must win. Transaction removal may cause the
+dispatcher to drop the late event before the FSM sees it; either layer is safe
+if callback count remains one. The report should name which layer the real
+branch uses.</p>
+<p>Timeout payloads need the transaction ID because they share a dispatcher with
+network results. A bare “read timed out” event risks terminating whatever read
+happens to be active when it arrives.</p>
+<div class="page-break"></div>
+<h2>20. Deep study plate: read consistency history</h2>
+<div class="mermaid-image"><img src="mermaid/06_read_protocol-05.png" alt="Rendered Mermaid diagram 5" /></div>
+<p>To judge the history, include the write’s replication/commit interval and both
+clients’ program orders. C1’s later read must follow its write. C2’s read may
+be placed before the write if the operations overlap and the implementation’s
+visibility rules permit it. If C2 reads 0 after observing another later write,
+the required order may become impossible.</p>
+<p>This reasoning is more precise than comparing wall-clock log lines, whose
+timestamps do not define a global serialization.</p>
+<div class="page-break"></div>
+<h2>21. Student workbook: test matrix</h2>
+<div class="mermaid-image"><img src="mermaid/06_read_protocol-06.png" alt="Rendered Mermaid diagram 6" /></div>
+<p>For each leaf, specify initial positions, target actor, messages injected,
+expected callback, and forbidden second callback. Then state whether the test
+proves the local FSM, the client queue, or a cross-subsystem consistency claim.</p>
 </body>
 </html>

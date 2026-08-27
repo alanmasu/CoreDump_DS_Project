@@ -228,3 +228,149 @@ picture, it is not yet a convergence argument.
 Create a table for replicas with observed epochs `(3,8)`, `(3,10)`, and `(4,0)`
 and IDs 1–3. Which candidate wins, and why? Then repeat with the best candidate
 crashed before synchronization and explain what the recovery layer must do.
+
+<div class="page-break"></div>
+
+## 18. Deep study plate: ring construction
+
+```mermaid
+flowchart LR
+    R0[Replica 0] --> R1[Replica 1]
+    R1 --> R2[Replica 2]
+    R2 --> R3[Replica 3]
+    R3 --> R4[Replica 4]
+    R4 --> R0
+```
+
+The ring is a deterministic ordering of static membership, commonly by replica
+ID. Every survivor must calculate the same successor relation. Actor creation
+order or map iteration order is not a safe substitute unless explicitly
+normalized.
+
+Ring navigation should terminate after considering finite membership. When a
+next hop is unavailable, advance to the next candidate; when every other member
+is unavailable, the majority assumption determines whether progress is still
+permitted.
+
+<div class="page-break"></div>
+
+## 19. Deep study plate: token circulation
+
+```mermaid
+sequenceDiagram
+    participant R1
+    participant R2
+    participant R3
+    participant R4
+    R1->>R2: Election token(best=R1)
+    R2-->>R1: ACK attempt 1
+    R2->>R3: token(best=R2 if fresher)
+    R3-->>R2: ACK attempt 1
+    R3->>R4: token(best)
+    R4->>R1: completed circulation
+```
+
+ACK transfers forwarding responsibility. The previous sender stops retrying
+only after a valid ACK for the current target and attempt. The token accumulates
+or carries the best candidate according to one deterministic comparison.
+
+Transaction ID and failed-coordinator scope distinguish this circulation from
+an old or competing election. A token returning to its initiator means
+collection completed; it does not yet mean recovery completed.
+
+<div class="page-break"></div>
+
+## 20. Deep study plate: skip a crashed neighbor
+
+```mermaid
+sequenceDiagram
+    participant R1
+    participant R2 as R2 crashed
+    participant R3
+    R1-xR2: token attempt 1
+    R1->>R1: ACK timeout attempt 1
+    R1->>R1: mark R2 unavailable
+    R1->>R3: token attempt 2
+    R3-->>R1: ACK attempt 2
+```
+
+The timeout payload must identify target and attempt. A late ACK from R2 for
+attempt 1 cannot cancel responsibility already transferred to R3 in attempt 2.
+The unavailable set prevents endless retries of the same dead neighbor.
+
+Tests should inject the late ACK as well as the missing one. That establishes
+generation validation, not merely timeout progress.
+
+<div class="page-break"></div>
+
+## 21. Deep study plate: candidate freshness order
+
+```mermaid
+flowchart TD
+    Start[Compare candidates] --> Obs{one has observed update?}
+    Obs -->|yes| PreferObs[prefer observed knowledge]
+    Obs -->|same category| Epoch{newer EpochPair?}
+    Epoch -->|yes| PreferNew[prefer newer pair]
+    Epoch -->|equal| Id{higher replica ID?}
+    Id -->|yes| PreferId[deterministic tie break]
+```
+
+Replica ID alone elects deterministically but may choose a node missing the
+latest recovery evidence. Freshness comes first because coordinator selection
+is coupled to interrupted-update recovery. ID only breaks genuine ties.
+
+Define comparison for null or absent history explicitly. Malformed candidates
+must be rejected before routing so they cannot win by an accidental null-order
+rule.
+
+<div class="page-break"></div>
+
+## 22. Deep study plate: competing elections
+
+```mermaid
+sequenceDiagram
+    participant A as Initiator A
+    participant X as Shared replica
+    participant B as Initiator B
+    A->>X: token election A
+    B->>X: token election B
+    X->>X: deterministic preferred initiator rule
+    X-->>A: forward/ack winner
+    X--xB: reject or absorb loser
+```
+
+Staggered starts reduce collisions but are not a correctness proof. When two
+tokens coexist, all replicas must apply the same preference scoped to the same
+failed coordinator. Completed-election memory then rejects a late loser after
+the new term begins.
+
+Separate token preference from final candidate preference: the chosen token is
+the mechanism that collects candidates; the freshest candidate may be another
+replica entirely.
+
+<div class="page-break"></div>
+
+## 23. Student workbook: election proof obligations
+
+```mermaid
+mindmap
+  root((Election))
+    Ring
+      deterministic membership order
+      finite skip of dead nodes
+    Token
+      scoped identity
+      current attempt ACK
+    Candidate
+      freshest evidence
+      deterministic tie break
+    Completion
+      one winner
+      synchronization next
+```
+
+Prove termination under the stated surviving-majority assumption, then explain
+where the proof relies on bounded timeout and static membership. Construct a
+trace with two initiators, one dead neighbor, a late ACK, and the freshest
+candidate crashing. Mark which behavior is implemented and which recovery step
+still needs evidence.

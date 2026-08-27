@@ -4,12 +4,12 @@ This directory contains long-form study reports for the CoreDump distributed-sys
 
 The final exam report is intentionally **not** included.
 
-This is the deep study edition. Each subsystem report combines a codebase map
-with beginner explanations, a protocol/lifecycle diagram, at least one
-“code-microscope” walkthrough, concrete failure or timing examples, and short
-practice questions. The wording is intentionally instructional so a student
-can read one report without already knowing Akka or distributed-systems
-terminology.
+This is the expanded deep study edition. Every subsystem report is at least ten
+A4 pages and combines a codebase map with beginner explanations,
+“code-microscope” walkthroughs, concrete failure or timing examples, six
+rendered Mermaid study diagrams, and practice questions. The wording is
+intentionally instructional so a student can read one report without already
+knowing Akka or distributed-systems terminology.
 
 ## Reading order
 
@@ -29,11 +29,13 @@ terminology.
 14. `13_observability_testing_and_verification.pdf`
 15. `14_end_to_end_correctness_and_corner_cases.pdf`
 
-Editable Markdown lives in `sources/`. Run `./reports/build_reports.sh` from anywhere in the repository to regenerate the PDFs. The build uses `cmark` for Markdown parsing and the local `render_reports.py` ReportLab renderer; this avoids depending on a GUI office installation and makes replacement of existing PDFs deterministic. Generated HTML is kept in `reports/generated/` so rendering problems can be inspected without editing the PDFs.
+Editable Markdown lives in `sources/`. Run `./reports/build_reports.sh` from anywhere in the repository to regenerate the PDFs. The build renders Mermaid fences with `mmdc`, parses Markdown with `cmark`, and lays out PDFs with the local `render_reports.py` ReportLab renderer. Generated HTML and Mermaid PNGs are kept in `reports/generated/` so rendering problems can be inspected without editing the PDFs.
 
-The current deep edition is 15 PDFs / 77 A4 pages. PDF validation checks page
-metadata, extractable text, and PDF syntax; representative pages were also
-rendered to images to check diagrams, callouts, tables, and code blocks.
+The current deep edition is 15 PDFs, at least 10 pages per report, and 90
+rendered Mermaid diagrams. The build fails if any PDF falls below the page
+minimum. PDF validation checks page metadata and extractable text;
+representative pages are also rendered to images to check diagrams, callouts,
+tables, and code blocks.
 
 ## Provenance rule
 

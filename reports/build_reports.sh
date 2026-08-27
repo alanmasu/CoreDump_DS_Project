@@ -4,12 +4,19 @@ set -euo pipefail
 report_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 source_dir="$report_dir/sources"
 generated_dir="$report_dir/generated"
+mermaid_dir="$generated_dir/mermaid"
 mkdir -p "$generated_dir"
+mkdir -p "$mermaid_dir"
+find "$mermaid_dir" -maxdepth 1 -type f -delete
 
 for source in "$source_dir"/*.md; do
     name=$(basename "$source" .md)
     html="$generated_dir/$name.html"
+    prepared="$generated_dir/$name.rendered.md"
     title=$(sed -n '1s/^# //p' "$source")
+
+    python3 "$report_dir/prepare_mermaid.py" \
+        "$source" "$prepared" "$mermaid_dir" "$name"
 
     {
         printf '%s\n' '<!doctype html>' '<html lang="en">' '<head>' '<meta charset="utf-8">'
@@ -17,9 +24,10 @@ for source in "$source_dir"/*.md; do
         printf '%s\n' '<style>'
         sed -n '1,$p' "$report_dir/style.css"
         printf '%s\n' '</style>' '</head>' '<body>'
-        cmark --unsafe --smart "$source"
+        cmark --unsafe --smart "$prepared"
         printf '%s\n' '</body>' '</html>'
     } > "$html"
+    rm -f -- "$prepared"
 done
 
 for html in "$generated_dir"/*.html; do
@@ -37,9 +45,14 @@ if [[ "$expected" -ne "$actual" ]]; then
 fi
 
 for pdf in "$report_dir"/*.pdf; do
+    qpdf --check "$pdf" >/dev/null
     pdfinfo "$pdf" >/dev/null
     if [[ $(pdftotext "$pdf" - | wc -w) -lt 300 ]]; then
         printf 'PDF appears unexpectedly short: %s\n' "$pdf" >&2
+        exit 1
+    fi
+    if [[ $(pdfinfo "$pdf" | awk '/^Pages:/ {print $2}') -lt 10 ]]; then
+        printf 'PDF has fewer than 10 pages: %s\n' "$pdf" >&2
         exit 1
     fi
 done

@@ -317,5 +317,58 @@ did not do and what the survivors did do.</p>
 <p>For each crash category, choose one message that may complete before the crash
 and one that must be rejected after it. Explain why the answer changes when the
 crash is injected before versus after a WRITEOK.</p>
+<div class="page-break"></div>
+<h2>17. Deep study plate: crash status lifecycle</h2>
+<div class="mermaid-image"><img src="mermaid/10_crash_model_and_fault_injection-01.png" alt="Rendered Mermaid diagram 1" /></div>
+<p><code>PENDING</code> makes injection repeatable: the test names a semantic event and an
+occurrence count rather than racing a wall-clock sleep. The transition to
+<code>CRASHED</code> should be observable through a callback or status probe so the next
+test action starts from known state.</p>
+<p>Document whether the triggering event completes before the crash takes effect.
+“Crash on first WRITEOK” is ambiguous unless the implementation says before
+send, after send, before apply, or after apply.</p>
+<div class="page-break"></div>
+<h2>18. Deep study plate: entry-point audit</h2>
+<div class="mermaid-image"><img src="mermaid/10_crash_model_and_fault_injection-02.png" alt="Rendered Mermaid diagram 2" /></div>
+<p>Use the receive builder as an audit checklist. A central guard is easier to
+reason about, but special handlers may run before it. Trace callbacks too: a
+crashed actor must not report update application or election success from a
+queued event.</p>
+<p>The stable ActorRef is a testing convenience. Do not confuse addressability
+with liveness; messages can still be sent to a simulated dead node and then
+ignored.</p>
+<div class="page-break"></div>
+<h2>19. Deep study plate: occurrence counting</h2>
+<div class="mermaid-image"><img src="mermaid/10_crash_model_and_fault_injection-03.png" alt="Rendered Mermaid diagram 3" /></div>
+<p>Count only the selected semantic category. If helper methods increment at
+slightly different positions across feature branches, the same test name can
+inject different windows. Reports must tie the category to concrete code and
+branch provenance.</p>
+<p>Reset counters between tests and avoid static mutable instrumentation. Otherwise
+execution order changes the injected failure.</p>
+<div class="page-break"></div>
+<h2>20. Deep study plate: crash windows in an update</h2>
+<div class="mermaid-image"><img src="mermaid/10_crash_model_and_fault_injection-04.png" alt="Rendered Mermaid diagram 4" /></div>
+<p>Each edge produces a different recovery obligation. Before dissemination,
+survivors may know nothing. After quorum, a majority contains evidence. After
+one correct replica applies, uniform agreement requires eventual preservation.
+After local apply but before callback, client knowledge and system state differ.</p>
+<p>Name the chosen window in every test assertion. “Coordinator crash test” is too
+broad to explain what property was exercised.</p>
+<div class="page-break"></div>
+<h2>21. Deep study plate: deterministic observation</h2>
+<div class="mermaid-image"><img src="mermaid/10_crash_model_and_fault_injection-05.png" alt="Rendered Mermaid diagram 5" /></div>
+<p>Positive and negative observations belong together. Verify the crash occurred,
+the dead actor stopped output, and survivors made the expected progress. Use a
+bound derived from protocol delay rather than an arbitrary long sleep.</p>
+<p>TestKit silence assertions should be scoped narrowly: too short misses late
+violations, while too long slows the suite without adding evidence.</p>
+<div class="page-break"></div>
+<h2>22. Student workbook: fault campaign</h2>
+<div class="mermaid-image"><img src="mermaid/10_crash_model_and_fault_injection-06.png" alt="Rendered Mermaid diagram 6" /></div>
+<p>Choose one leaf from each branch and form a scenario. Record initial state,
+exact injection transition, allowed final states, and forbidden output. Repeat
+the same scenario on the relevant feature ref because crash-category placement
+may differ across branches.</p>
 </body>
 </html>

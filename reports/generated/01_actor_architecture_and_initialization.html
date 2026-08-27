@@ -328,5 +328,83 @@ special entry message (<code>InitSystem</code>, crash events, and client request
 the fields that belong to a transaction (protocol-local state). Then explain
 why sharing one mutable transaction object between two replica actors would
 break the actor model even if Java allowed the reference to be passed.</p>
+<div class="page-break"></div>
+<h2>15. Deep study plate: actor topology and ownership</h2>
+<div class="mermaid-image"><img src="mermaid/01_actor_architecture_and_initialization-01.png" alt="Rendered Mermaid diagram 1" /></div>
+<p>Every rectangle is an independent mailbox and state boundary. The <code>ActorRef</code>
+is a safe address, not a direct Java reference for calling methods on the
+actor. A sender constructs an immutable message and uses <code>tell</code>; the receiver
+later handles it on its own actor thread. The transaction objects inside R0
+cannot be read or modified by R1. This isolation is the reason mutable FSMs can
+be ordinary objects: only their owning actor calls them.</p>
+<p>When studying a field, ask who owns it. Membership, coordinator reference,
+positions, history, crash status, and <code>activeTransactions</code> belong to a replica.
+An ACK set, FSM state, timeout handle, and attempt number belong to one
+transaction. A static mutable collection would escape both boundaries and
+should immediately attract attention in a review.</p>
+<div class="page-break"></div>
+<h2>16. Deep study plate: initialization happens by message</h2>
+<div class="mermaid-image"><img src="mermaid/01_actor_architecture_and_initialization-02.png" alt="Rendered Mermaid diagram 2" /></div>
+<p>This two-phase construction solves a circular dependency: the membership map
+cannot be complete until all <code>ActorRef</code>s exist. Constructors therefore capture
+fixed configuration, while <code>InitSystem</code> supplies the completed graph. Students
+should distinguish Java object construction from protocol readiness. A field
+being non-null after the constructor does not mean the replica knows its ring
+neighbor, current coordinator, or heartbeat role.</p>
+<p>Inspect handlers that may run before initialization. A clear design either
+guarantees ordering in the fixture, stashes early protocol messages, or rejects
+them with an explicit reason. Processing an election token with an empty member
+map is worse than delaying it because it may generate a structurally invalid
+ring traversal.</p>
+<div class="page-break"></div>
+<h2>17. Deep study plate: two-stage dispatch</h2>
+<div class="mermaid-image"><img src="mermaid/01_actor_architecture_and_initialization-03.png" alt="Rendered Mermaid diagram 3" /></div>
+<p>Actor-level dispatch answers “which local component owns this event?” The FSM
+then answers “is it valid now?” The second question cannot be skipped. A valid
+transaction ID on an ACK does not prove the sender is a participant, and a
+valid watchdog ID does not prove its version is current. This layered checking
+is the recurring pattern across heartbeat, update, and election.</p>
+<p>Trace one message in the debugger by recording its runtime class, sender,
+transaction ID, destination actor, active FSM state, and resulting effect. If
+you cannot fill one column, you have located a hidden assumption worth
+documenting or testing.</p>
+<div class="page-break"></div>
+<h2>18. Deep study plate: actor turn versus distributed atomicity</h2>
+<div class="mermaid-image"><img src="mermaid/01_actor_architecture_and_initialization-04.png" alt="Rendered Mermaid diagram 4" /></div>
+<p>Akka guarantees one handler at a time inside A, but B and C execute
+independently. Therefore, assigning a field and sending a message inside one A
+handler is locally ordered, not globally atomic. C may serve a read between
+A’s local update and B’s ACK. Protocol states and epochs make those
+interleavings safe; actor serialization alone cannot.</p>
+<p>This distinction is a common exam trap. “Actors avoid races” is too broad.
+Actors avoid unsynchronized concurrent access to one actor’s encapsulated
+fields. They do not avoid races between messages, timeouts, or decisions made
+by different actors. Distributed algorithms are largely about controlling
+those remaining races.</p>
+<div class="page-break"></div>
+<h2>19. Deep study plate: simulated crash lifecycle</h2>
+<div class="mermaid-image"><img src="mermaid/01_actor_architecture_and_initialization-05.png" alt="Rendered Mermaid diagram 5" /></div>
+<p>The actor process remains addressable after a simulated crash so tests can use
+stable <code>ActorRef</code>s. “Crashed” is therefore a semantic state enforced by guards,
+not Akka termination. Every entry path—including timers and self-messages—must
+observe it. A forgotten handler can resurrect protocol output even though
+ordinary network messages are blocked.</p>
+<p>For a code audit, enumerate the receive builder’s message types and mark the
+crash guard for each. Then enumerate direct transaction calls made from actor
+methods. This creates a concrete completeness argument rather than relying on
+one top-level boolean.</p>
+<div class="page-break"></div>
+<h2>20. Student workbook and oral-exam prompts</h2>
+<div class="mermaid-image"><img src="mermaid/01_actor_architecture_and_initialization-06.png" alt="Rendered Mermaid diagram 6" /></div>
+<p>Explain the architecture without using the word “thread” until the end. Start
+with ownership and messages. Next, draw the initialization sequence and show
+why the member map cannot be passed completely to the first replica’s
+constructor. Finally, take an ACK and explain both dispatch stages.</p>
+<p>Practical exercises: add a test for a protocol message before initialization;
+add a test for a correct ID but wrong sender; and add a crash test in which a
+queued timer arrives after the state becomes <code>CRASHED</code>. For each test, state
+the expected absence of side effects as well as the expected message. A good
+answer names what must not change: position, history, active transaction count,
+or listener callback count.</p>
 </body>
 </html>

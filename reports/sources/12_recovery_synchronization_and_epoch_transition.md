@@ -240,3 +240,145 @@ Draw the messages when the synchronization winner crashes after sending to one
 follower. Which replicas may serve reads? Which epoch should the second
 election advertise? Answer using explicit state, not the wall-clock order of
 messages.
+
+<div class="page-break"></div>
+
+## 17. Deep study plate: recovery barrier
+
+```mermaid
+stateDiagram-v2
+    [*] --> Electing
+    Electing --> Synchronizing: winner chosen
+    Synchronizing --> Installing: valid state received
+    Installing --> Ready: required survivors synchronized
+    Ready --> [*]: accept new-term writes
+```
+
+Coordinator election is not the readiness transition. New writes remain behind
+a barrier until the new term has a state that preserves required old-term
+updates. The precise acknowledgement condition should be explicit; merely
+sending synchronization does not prove recipients installed it.
+
+Reads need a documented policy during the barrier. Serving a stable old
+snapshot may be legal in some histories, while serving a partially installed
+snapshot may not.
+
+<div class="page-break"></div>
+
+## 18. Deep study plate: synchronization message validation
+
+```mermaid
+flowchart TD
+    S[SynchronizationMsg] --> A{sender is elected coordinator?}
+    A -->|no| Drop[reject]
+    A -->|yes| E{newer expected epoch?}
+    E -->|no| Drop
+    E -->|yes| Shape{snapshot and history valid?}
+    Shape -->|no| Drop
+    Shape -->|yes| Install[install atomically in one actor turn]
+```
+
+Array length, immutable copy, ordered history, and term identity are protocol
+validation, not defensive extras. A valid transaction ID alone does not prove
+the sender won the election. After installation, old transaction FSMs and
+timers must be cleaned up before heartbeat restarts.
+
+Copy incoming arrays and collections so later sender mutation cannot change
+installed state outside the receiver's mailbox.
+
+<div class="page-break"></div>
+
+## 19. Deep study plate: snapshot plus history
+
+```mermaid
+flowchart LR
+    Winner[Winner recovery state] --> Snapshot[positions snapshot]
+    Winner --> History[ordered update history]
+    Winner --> Pending[pending observed update evidence]
+    Snapshot --> Receiver[Receiver install]
+    History --> Receiver
+    Pending --> Receiver
+```
+
+The snapshot supports immediate materialized reads. History supports ordering,
+deduplication, and audit of past decisions. Pending evidence supports recovery
+of a quorum or partial WRITEOK window. A complete design may checkpoint old
+history, but then the checkpoint needs an explicit safety meaning.
+
+The inspected election branch primarily copies position state. Report this as
+snapshot synchronization and keep full history replay as a limitation unless
+the exact code path proves otherwise.
+
+<div class="page-break"></div>
+
+## 20. Deep study plate: epoch transition
+
+```mermaid
+flowchart LR
+    Old[Old term 4, last seq 9] --> Recover[resolve required 4:x updates]
+    Recover --> New[install term 5, sequence baseline]
+    New --> Heartbeat[start term-5 heartbeat]
+    Heartbeat --> Writes[assign 5:1, 5:2...]
+```
+
+A newer term orders all its updates after older terms, but that ordering cannot
+erase unresolved old work. Resolve or carry the evidence first, then establish
+the new sequence baseline. Every survivor must install the same coordinator and
+term before accepting its messages.
+
+Queued term-4 UPDATE, ACK, WRITEOK, heartbeat, and election timeout messages may
+still arrive. Sender, epoch, transaction, state, and generation checks make
+them harmless.
+
+<div class="page-break"></div>
+
+## 21. Deep study plate: winner fails during synchronization
+
+```mermaid
+sequenceDiagram
+    participant W as Winner W
+    participant R1
+    participant R2
+    W->>R1: synchronization term 5
+    W--xR2: crashes before send
+    R2->>R2: watchdog/election for failed W
+    R2->>R1: new election token carries installed evidence
+    R1-->>R2: advertise freshest term-5 state
+```
+
+The second election must not choose using numeric ID alone. R1 may be the only
+survivor that installed the first winner's state. The protocol needs a way to
+advertise that freshness without treating a half-installed term as permission
+for arbitrary new writes.
+
+This scenario exposes why “callbacks on every survivor” and synchronization
+acknowledgements are useful test evidence.
+
+<div class="page-break"></div>
+
+## 22. Student workbook: recovery audit
+
+```mermaid
+mindmap
+  root((Recovery audit))
+    Input
+      elected sender
+      epoch
+      snapshot shape
+      ordered history
+    Install
+      immutable copy
+      cleanup old FSMs
+      restart heartbeat
+    Barrier
+      acknowledgement rule
+      read policy
+      release writes
+    Failure
+      winner crashes midway
+```
+
+For each item, point to implementation evidence or mark it as an unmet
+requirement. Then build a trace beginning with partial WRITEOK, followed by two
+coordinator failures. The trace is safe only if required update knowledge
+survives both transitions.

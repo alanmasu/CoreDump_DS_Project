@@ -199,3 +199,157 @@ them as wrapper tests and pair them with integration tests for the child.
 Draw the three races above and label which actor owns each timer. Then explain
 why a client retry needs an idempotency key if the first child may have already
 committed after the parent timed out.
+
+<div class="page-break"></div>
+
+## 16. Deep study plate: wrapper boundaries
+
+```mermaid
+flowchart LR
+    Client[Client parent FSM] --> Contact[Contact replica parent]
+    Contact --> Child[Update child FSM]
+    Child --> Coordinator[Coordinator update role]
+    Coordinator --> Followers[Participant roles]
+    Followers --> Child
+    Child --> Contact
+    Contact --> Client
+```
+
+The wrapper translates a simple client operation into a distributed protocol.
+The parent cares about one terminal result and deadline; the child cares about
+coordinator routing, quorum, epochs, and WRITEOK. A wrapper test can validate
+translation even when the child is replaced by an injected completion message.
+It cannot prove the quorum protocol.
+
+Identify the owner of every arrow. Objects remain local; only messages cross
+actor boundaries. This prevents accidental assumptions that the client and
+replica share one mutable `WriteTransaction` instance.
+
+<div class="page-break"></div>
+
+## 17. Deep study plate: ID translation
+
+```mermaid
+sequenceDiagram
+    participant C as Client parent P
+    participant R as Contact replica
+    participant U as Child update U
+    C->>R: WriteMsg(P,index,value)
+    R->>R: store mapping U -> P
+    R->>U: start U
+    U-->>R: WriteFinishMsg(U)
+    R->>R: resolve U -> P and remove mapping
+    R-->>C: WriteResultMsg(P)
+```
+
+The mapping is protocol state. It should be installed before child work can
+complete, removed exactly once, and rejected if a foreign child ID arrives.
+Logging both IDs on every transition makes branch-level tests far easier to
+interpret.
+
+If multiple parent writes can coexist at a replica, a single `writeId` field is
+insufficient. The active transaction map or explicit correlation map must keep
+each relationship separate.
+
+<div class="page-break"></div>
+
+## 18. Deep study plate: contacting a follower
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant F as Contact follower
+    participant K as Coordinator
+    C->>F: write request
+    F->>K: forward/start child update
+    K->>F: UPDATE then WRITEOK
+    F->>F: child finishes local commit
+    F-->>C: client-facing result
+```
+
+The follower is not allowed to invent the global order. It forwards the update
+to the current coordinator and later participates like other replicas. The
+client result should not be sent merely because forwarding succeeded; it must
+wait for the child completion condition defined by the update protocol.
+
+Coordinator changes complicate this path. A stored coordinator reference may
+be stale, so timeout and election integration must define whether the wrapper
+waits, retries, or reports uncertainty.
+
+<div class="page-break"></div>
+
+## 19. Deep study plate: three completion races
+
+```mermaid
+stateDiagram-v2
+    [*] --> WaitingChild
+    WaitingChild --> Done: matching WriteFinish first
+    WaitingChild --> TimedOut: parent deadline first
+    WaitingChild --> Failed: defined child failure
+    Done --> Cleaned
+    TimedOut --> Cleaned
+    Failed --> Cleaned
+    Cleaned --> Cleaned: late events ignored
+```
+
+Every terminal path must remove parent-child correlation, invalidate timers,
+emit at most one callback, and release the client queue. Model these effects as
+one termination routine or prove equivalent guards in each handler.
+
+Test a finish and timeout in both orders. Then inject a second finish. The
+expected result is not an exception; it is stable terminal state and one
+observable callback.
+
+<div class="page-break"></div>
+
+## 20. Deep study plate: what wrapper tests establish
+
+```mermaid
+flowchart TD
+    Inject[Inject WriteFinishMsg] --> Wrapper[Wrapper test passes]
+    Wrapper --> P1[ID correlation works]
+    Wrapper --> P2[Client result shape works]
+    Wrapper --> P3[Timer cleanup works]
+    Wrapper -. does not prove .-> N1[Quorum reached]
+    Wrapper -. does not prove .-> N2[positions updated]
+    Wrapper -. does not prove .-> N3[Recovery preserves commit]
+```
+
+This evidence boundary should appear in every report that cites
+`TestWriteTransaction`. A test double is valuable because it isolates the
+parent. Integration tests must later run a real child across several replicas
+and verify both callbacks and state.
+
+When a test manually manufactures completion, inspect whether it could create
+an impossible sender or ID. A permissive wrapper might pass the test yet accept
+messages no real child should be able to send.
+
+<div class="page-break"></div>
+
+## 21. Student workbook: design the wrapper contract
+
+```mermaid
+mindmap
+  root((Write wrapper))
+    Input
+      parent ID
+      index and value
+      contact replica
+    Child
+      fresh child ID
+      coordinator path
+      completion message
+    Terminal
+      success
+      timeout
+      one cleanup
+    Evidence
+      wrapper unit test
+      quorum integration test
+```
+
+Write preconditions and postconditions for parent start, child completion, and
+parent timeout. Include the mapping state in each postcondition. Then draw a
+trace in which the client times out but the child commits later; explain why
+the callback remains timeout and why replicated recovery must still preserve
+the update.

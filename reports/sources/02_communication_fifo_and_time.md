@@ -217,3 +217,160 @@ spuriously start elections.
    field (for example, a generation/version) lets the handler reject it?
 3. In a test, how would you distinguish “the message was delayed” from “the
    receiver crashed” without sleeping for an arbitrary number of seconds?
+
+<div class="page-break"></div>
+
+## 18. Deep study plate: the channel matrix
+
+```mermaid
+flowchart LR
+    A[Replica A] -->|queue A→B| B[Replica B]
+    A -->|queue A→C| C[Replica C]
+    C -->|queue C→B| B
+    B -->|queue B→A| A
+```
+
+Model the network as a matrix of directed queues. `A→B` and `B→A` are
+different channels, as are `A→B` and `C→B`. FIFO says messages leave one cell
+of that matrix in insertion order. It says nothing about which cell delivers
+next. This mental model makes cross-sender interleavings obvious and prevents
+the mistaken claim that one receiver mailbox sees a global send order.
+
+For every protocol assumption, write its scope. Reliable means the simulated
+channel eventually delivers unless the receiver's crash behavior ignores it.
+FIFO means same source and destination. Random delay means a scheduled arrival,
+not packet loss. Sender preservation means the receiver can validate who
+originated the message even though the channel performed the physical `tell`.
+
+<div class="page-break"></div>
+
+## 19. Deep study plate: queue scheduling
+
+```mermaid
+sequenceDiagram
+    participant A as Sender A
+    participant Q as Channel A→B queue
+    participant S as Scheduler
+    participant B as Receiver B
+    A->>Q: enqueue m1
+    A->>Q: enqueue m2
+    Q->>S: schedule head m1
+    S->>B: deliver m1 as sender A
+    Q->>S: schedule next m2
+    S->>B: deliver m2 as sender A
+```
+
+The safe implementation pattern schedules only the head of a directed queue.
+When delivery completes, it removes that envelope and schedules the next.
+Scheduling every message independently with a random delay could let m2's
+shorter delay overtake m1, violating FIFO. When reading `NetworkChannel`, find
+the data structure that represents this responsibility handoff.
+
+Sender identity is part of the envelope. If delivery uses the channel actor as
+the sender, a participant cannot distinguish the coordinator from a follower.
+If it uses `noSender`, sender validation becomes impossible. A channel wrapper
+must therefore preserve the logical sender when it finally calls the target.
+
+<div class="page-break"></div>
+
+## 20. Deep study plate: timers live outside the channel
+
+```mermaid
+flowchart TD
+    FSM[Transaction FSM] -->|scheduleOnce| Local[Local scheduler]
+    FSM -->|unicast/broadcast| Net[NetworkChannel]
+    Local -->|timeout event| Mailbox[Owner mailbox]
+    Net -->|delayed protocol message| Mailbox
+    Mailbox --> Race{Which event arrives first?}
+    Race --> Success[Remote result wins]
+    Race --> Timeout[Timeout wins]
+```
+
+The mailbox is the meeting point of independent time sources. A timeout and a
+network result may be queued close together; wall-clock timestamps do not
+decide correctness. The FSM state and generation decide which event still has
+authority. Whichever terminal event is processed first clears the active
+transaction; the later one becomes stale.
+
+Cancellation cannot retract an event already queued in the mailbox. This is
+why heartbeat uses `watchdogVersion`, and why other retry timers benefit from
+attempt IDs. Treat the timer payload like any remote message: validate it when
+consumed.
+
+<div class="page-break"></div>
+
+## 21. Deep study plate: calculate a timeout budget
+
+```mermaid
+gantt
+    title Example healthy update budget
+    dateFormat X
+    axisFormat %L
+    section Network
+    UPDATE outward      :0, 20
+    ACK return          :20, 40
+    WRITEOK outward     :40, 60
+    section Local
+    Mailbox and jitter  :60, 70
+```
+
+Let the maximum configured one-hop delay be `L`. An UPDATE/ACK round trip needs
+about `2L`, while a final WRITEOK adds another `L` before a remote participant
+applies. Processing, scheduler jitter, and test-probe delivery need additional
+margin. This gives a reasoned lower bound; it is not a promise that the JVM
+always schedules exactly at that instant.
+
+For heartbeat, the bound includes heartbeat period plus delivery delay. A
+watchdog shorter than that sum creates false suspicions in a healthy execution.
+A watchdog many times larger preserves safety but slows liveness. Report both
+trade-offs instead of presenting a constant without its units or derivation.
+
+<div class="page-break"></div>
+
+## 22. Deep study plate: stale-event race
+
+```mermaid
+sequenceDiagram
+    participant F as Follower FSM
+    participant M as Mailbox
+    F->>M: schedule Watchdog(v6)
+    M->>F: Heartbeat arrives
+    F->>F: increment to v7 and cancel v6
+    Note over M: v6 was already queued
+    M->>F: Watchdog(v6)
+    F->>F: reject because 6 != 7
+```
+
+This race is deterministic enough to test. Construct the older expiry
+message, process a valid heartbeat that advances the version, and then inject
+the old message. The absence of an election callback is the important
+assertion. A test that only checks cancellation returns successfully does not
+exercise the queued-event problem.
+
+The same pattern applies to election neighbor retries: a timeout for attempt 2
+must not invalidate an ACK for attempt 3. Name generations according to their
+scope (`watchdogVersion`, `attempt`) rather than using one global counter with
+ambiguous meaning.
+
+<div class="page-break"></div>
+
+## 23. Student workbook: legal and illegal histories
+
+```mermaid
+flowchart TD
+    Start[Observed delivery order] --> Same{Same source and destination?}
+    Same -->|yes| Order{Matches send order?}
+    Order -->|no| Violation[FIFO violation]
+    Order -->|yes| Legal[Legal channel history]
+    Same -->|no| Legal2[Either relative order may be legal]
+```
+
+For each trace, mark channel keys rather than actor names alone. Then decide
+whether an ordering is illegal. Create a trace where A sends m1 then m2 to B,
+while C sends x to B. Legal deliveries include m1,x,m2 and x,m1,m2; m2 before
+m1 is illegal. Repeat with A sending m1 to B and m2 to C: either delivery may
+occur first because the destination changed.
+
+Finish by designing three tests: FIFO under contrasting random delays, sender
+preservation, and stale local timer rejection. Explain what each test proves
+and what it does not prove about total-order broadcast.

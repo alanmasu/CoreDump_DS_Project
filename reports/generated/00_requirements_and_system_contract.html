@@ -347,5 +347,105 @@ reject or repair the disagreement?</li>
 <li>Which safety property would be threatened if a follower applied UPDATE
 before receiving WRITEOK?</li>
 </ol>
+<div class="page-break"></div>
+<h2>15. Extended guided study: the whole system as one pipeline</h2>
+<p>The following diagram is the map to keep beside you while reading every other
+report. The arrows show responsibility rather than Java inheritance. A request
+starts in a client-owned FSM, crosses an actor boundary, becomes a replicated
+update, and may later become recovery evidence. Failure detection and election
+run beside that foreground path rather than inside it.</p>
+<div class="mermaid-image"><img src="mermaid/00_requirements_and_system_contract-01.png" alt="Rendered Mermaid diagram 1" /></div>
+<p>Read the diagram from left to right for normal work and from heartbeat down to
+state for failure recovery. Notice that the application never directly edits
+replica state. Every boundary introduces a question: which ID identifies the
+conversation, who is allowed to send the next message, which epoch applies,
+and what happens if the event arrives after a timeout?</p>
+<h3>15.1 Requirement decomposition exercise</h3>
+<p>Take the sentence “writes are applied in the same order by all correct
+replicas.” It hides at least six smaller obligations. The coordinator must
+assign one ordered identity. Participants must associate the same payload with
+that identity. The quorum decision must not count one participant twice.
+WRITEOK must carry the decided identity. Applying it must be idempotent.
+Finally, election and synchronization must preserve the decision if the
+coordinator crashes. A useful report explains every obligation separately and
+then reconnects them.</p>
+<div class="mermaid-image"><img src="mermaid/00_requirements_and_system_contract-02.png" alt="Rendered Mermaid diagram 2" /></div>
+<p>This decomposition is also a debugging method. If replicas disagree, do not
+begin by staring at the final arrays. Compare the assigned pairs, then the
+payload associated with each pair, then quorum membership, then WRITEOK
+delivery, and finally recovery state. The first layer that differs is closer
+to the root cause than the visible array mismatch.</p>
+<div class="page-break"></div>
+<h2>16. A full normal-operation trace</h2>
+<p>Assume five replicas, R0–R4, with R0 as coordinator. Client C sends a write to
+R3. R3 owns the parent write transaction because it is the client’s contact
+point. Its child update reaches R0. R0 assigns the next pair, broadcasts
+UPDATE, and counts its own knowledge. When two distinct followers ACK, the set
+has three members, which is a strict majority of five. R0 broadcasts WRITEOK.
+Each receiver checks the transaction, sender, state, and pair before applying.
+R3 can then complete its parent and reply to C.</p>
+<div class="mermaid-image"><img src="mermaid/00_requirements_and_system_contract-03.png" alt="Rendered Mermaid diagram 3" /></div>
+<p>The diagram deliberately omits random delay arrows. <code>NetworkChannel</code> may
+delay each hop, but FIFO only constrains messages on the same directed link.
+R2 may ACK before R1 even if R1’s UPDATE was scheduled first. Correctness comes
+from the pair and responder set, not global arrival order.</p>
+<h3>16.1 Where a read fits</h3>
+<p>A read addressed to R3 examines R3’s materialized position at the mailbox turn
+that handles the read. If C queues the read after the write, the client manager
+does not start it until the write reaches a terminal callback. That produces
+C’s session order. A read from a different client may be handled at another
+replica during dissemination, so the system-level consistency claim also
+depends on when WRITEOK makes values visible and what reads are allowed during
+synchronization.</p>
+<div class="page-break"></div>
+<h2>17. Failure trace: responsibility moves, evidence stays</h2>
+<p>Now crash R0 after it sends WRITEOK only to R1. R1 has made the value visible;
+the other correct replicas may still expose the old value. Uniform agreement
+means the visible update cannot simply disappear. Heartbeat silence triggers
+election, candidate freshness helps select a replica with relevant evidence,
+and synchronization must carry enough information to complete or safely
+reconcile the update before accepting a newer-term write.</p>
+<div class="mermaid-image"><img src="mermaid/00_requirements_and_system_contract-04.png" alt="Rendered Mermaid diagram 4" /></div>
+<p>Ask four questions at every failure boundary. What fact had become externally
+visible? Which surviving nodes know that fact? Which message or history entry
+represents it? Which barrier prevents newer work from overtaking recovery?
+These questions are more precise than saying “the election fixes it.”</p>
+<div class="page-break"></div>
+<h2>18. Safety, liveness, and the limits of the inspected branches</h2>
+<div class="mermaid-image"><img src="mermaid/00_requirements_and_system_contract-05.png" alt="Rendered Mermaid diagram 5" /></div>
+<p>A code branch can demonstrate one local mechanism without establishing the
+system property. The read branch can correctly correlate a result while the
+integrated system still lacks a recovery barrier. The update branch can count
+a quorum while failing to mutate <code>positions[]</code>. The election branch can choose
+a deterministic candidate while copying only a snapshot rather than complete
+history. Therefore, exam language should distinguish “the class contains this
+mechanism” from “the combined system satisfies the property.”</p>
+<h3>18.1 A disciplined claim template</h3>
+<p>Use this five-part sentence when writing the later exam report: <strong>property,
+mechanism, code location, evidence, limitation</strong>. For example: “Follower
+watchdog versions prevent a queued old timeout from starting a new election;
+the heartbeat FSM compares the event generation in its expiry handler; focused
+tests cover stale expiry, while full integration with repeated coordinator
+changes remains a separate requirement.” This wording is both educational and
+honest.</p>
+<div class="page-break"></div>
+<h2>19. Extended revision questions</h2>
+<ol>
+<li>Produce a legal sequential history for two clients whose requests overlap.
+Which per-client orders must be preserved, and which cross-client order may
+you choose?</li>
+<li>Explain why FIFO from R0 to R1 does not order messages from R2 to R1.</li>
+<li>Give a counterexample in which a raw ACK counter reaches quorum using the
+same sender twice.</li>
+<li>Identify the exact moment an update becomes visible in the intended design.</li>
+<li>Explain why a snapshot can answer current reads but still be insufficient
+evidence for interrupted-update recovery.</li>
+<li>Draw a crash trace and label which claims are safety claims and which are
+liveness claims.</li>
+</ol>
+<p>If you can answer these without referring to class names, you understand the
+contract. The class names can then be added as implementation evidence rather
+than memorized as substitutes for reasoning.</p>
+<div class="mermaid-image"><img src="mermaid/00_requirements_and_system_contract-06.png" alt="Rendered Mermaid diagram 6" /></div>
 </body>
 </html>

@@ -222,3 +222,162 @@ collide.
 Add a test case for an ACK with a valid-looking epoch but the wrong
 `TransactionId`. Predict which dispatch guard drops it and why accepting it
 would corrupt a different update.
+
+<div class="page-break"></div>
+
+## 17. Deep study plate: identities form different namespaces
+
+```mermaid
+flowchart TB
+    Request[One logical client write] --> Parent[Parent TransactionId client:41]
+    Request --> Child[Child TransactionId replica:8]
+    Request --> Epoch[EpochPair term:3 sequence:12]
+    Parent --> ClientRouting[Route result to client FSM]
+    Child --> ReplicaRouting[Route update messages to replica FSMs]
+    Epoch --> Ordering[Order replicated update]
+```
+
+The three values refer to one logical operation but answer different questions.
+Parent and child IDs live in actor-owner namespaces; the epoch pair lives in a
+replicated ordering namespace. Reusing one value for all three jobs makes a
+trace look simpler while removing information the dispatchers need.
+
+Value-object quality matters here. Equality and hashing must use the same
+fields because IDs are keys in collections. `toString` should expose enough
+information for a log reader to distinguish owner and sequence. Null epoch
+metadata may be legal before sequencing, but every method that compares or
+records it needs a state guard.
+
+<div class="page-break"></div>
+
+## 18. Deep study plate: message anatomy
+
+```mermaid
+classDiagram
+    class Msg {
+      +TransactionId transactionId
+      +EpochPair epochPair
+    }
+    class UpdateMsg {
+      +int index
+      +int value
+    }
+    class AckMsg
+    class WriteOkMsg
+    Msg <|-- UpdateMsg
+    Msg <|-- AckMsg
+    Msg <|-- WriteOkMsg
+```
+
+The base message carries correlation and ordering metadata; concrete messages
+carry the facts needed by one transition. Immutability is important because a
+message may wait in a channel queue while the sender continues processing.
+If the sender later mutates a shared list or transaction object referenced by
+the message, the receiver observes a value that did not exist at send time.
+
+When examining a constructor, ask whether it defensively copies arrays and
+collections. Actor isolation protects actor fields, not mutable objects placed
+inside messages. This question is especially important for synchronization
+snapshots and update history.
+
+<div class="page-break"></div>
+
+## 19. Deep study plate: the active-transaction lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Constructed
+    Constructed --> Active: scheduleTransaction
+    Active --> Active: valid protocol message
+    Active --> Done: success
+    Active --> TimedOut: timeout
+    Done --> Removed: termination cleanup
+    TimedOut --> Removed: termination cleanup
+    Removed --> Removed: late messages ignored
+```
+
+Insertion into `activeTransactions` transfers routing responsibility to the
+owner actor. Removal means no future message should mutate that FSM. Success
+and timeout must converge on one cleanup path so they cannot both remove queue
+entries or emit callbacks. A late message after removal is expected in an
+asynchronous system and should normally be dropped safely.
+
+Clients typically allow one active request to preserve session order. Replicas
+allow several active FSMs because heartbeat, update, and election can overlap.
+That difference is intentional policy, not inconsistent framework use.
+
+<div class="page-break"></div>
+
+## 20. Deep study plate: entry messages create conversations
+
+```mermaid
+flowchart LR
+    Entry[Message without existing FSM] --> Kind{Entry kind}
+    Kind -->|client read/write| CreateClient[Create client transaction]
+    Kind -->|first UPDATE| CreateParticipant[Create participant update FSM]
+    Kind -->|election request| CreateElection[Create election FSM]
+    CreateClient --> Register[Register active ID]
+    CreateParticipant --> Register
+    CreateElection --> Register
+    Register --> Dispatch[Dispatch triggering event]
+```
+
+Not every message can be routed by lookup because the first message may be the
+reason the local FSM exists. The actor receive layer recognizes those entry
+types, validates them, creates the correct transaction subclass, registers its
+ID, and then starts or dispatches it. Missing an entry handler silently turns a
+valid remote request into an unknown transaction.
+
+Integration across feature branches is risky here: two branches may each add
+message classes and receive matches. A merge that compiles can still omit one
+match. The coverage map in report 13 should therefore be rechecked against the
+final receive builder.
+
+<div class="page-break"></div>
+
+## 21. Deep study plate: parent-child completion
+
+```mermaid
+sequenceDiagram
+    participant C as Client FSM parent P
+    participant R as Contact replica
+    participant U as Update FSM child U
+    C->>R: Write request carrying P
+    R->>U: start child U, remember P↔U
+    U-->>R: WriteFinish(U)
+    R-->>C: WriteResult(P)
+    Note over C,R: late Finish(U) is ignored after cleanup
+```
+
+Correlation translation is explicit state. The contact replica must remember
+which parent waits for which child. A child completion cannot simply reuse its
+own ID as a client result because the client dispatcher knows the parent ID.
+Conversely, routing all child network traffic with the parent ID can collide
+with a different actor's local numbering.
+
+Test both directions: a valid child completes exactly one parent, and a foreign
+or already-completed child cannot complete the current parent. Include timeout
+races because cleanup order is where mappings commonly leak.
+
+<div class="page-break"></div>
+
+## 22. Student workbook: debug one dropped message
+
+```mermaid
+flowchart TD
+    D[Dropped message] --> C1[Check runtime class]
+    C1 --> C2[Check destination receive match]
+    C2 --> C3[Check TransactionId equality/hash]
+    C3 --> C4[Check active FSM presence]
+    C4 --> C5[Check FSM state and sender]
+    C5 --> C6[Check epoch and generation]
+```
+
+Use this order because it moves from routing toward protocol semantics. Logging
+only the message class is insufficient; include owner, sequence, epoch, sender,
+receiver, and FSM state. Then reproduce the drop in a focused TestKit test.
+
+Oral-exam prompts: explain why transaction objects are not actors; explain why
+an epoch pair cannot replace a transaction ID; describe how entry messages
+create an FSM; and show why removal is a correctness event rather than memory
+cleanup alone. A strong answer includes a late-event example for each claim.

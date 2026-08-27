@@ -217,3 +217,154 @@ Write a three-row trace for `write(5)`, `read()`, and a late write result. Mark
 the active ID at every row and explain which message must be ignored. Then
 design a test that proves the queue advances once when success and timeout are
 delivered in either order.
+
+<div class="page-break"></div>
+
+## 16. Deep study plate: request queue ownership
+
+```mermaid
+flowchart LR
+    API[Application calls] --> Q[Client FIFO queue]
+    Q --> Active[One active transaction]
+    Active --> Target[Selected replica]
+    Target --> Callback[Result or timeout]
+    Callback --> Q
+```
+
+The client actor owns both the queue and the active slot. Application calls do
+not synchronously return replicated results; they enqueue work. Starting only
+the head preserves that client's program order and gives every callback one
+unambiguous context. Multiple clients still run concurrently because each owns
+its own queue.
+
+Inspect the point where a queued request becomes a transaction. The client must
+assign a fresh ID, select a target, schedule a timeout, and remember enough
+data to produce the typed callback. Those operations should occur in one actor
+turn so a result cannot race an only-partly-installed active context.
+
+<div class="page-break"></div>
+
+## 17. Deep study plate: success and timeout race
+
+```mermaid
+stateDiagram-v2
+    [*] --> Waiting
+    Waiting --> Done: matching result first
+    Waiting --> TimedOut: matching timeout first
+    Done --> Removed
+    TimedOut --> Removed
+    Removed --> Removed: late result or timeout ignored
+```
+
+The two terminal events are mutually exclusive by FSM state, not because the
+losing event vanishes. Cleanup must cancel or invalidate the timer, emit one
+callback, clear the active ID, and start the next request once. Centralizing
+those actions reduces double-dequeue bugs.
+
+Write tests in both orders. Inject success then timeout and timeout then
+success. Assert the exact callback count and the ID of the next started
+transaction. Testing only the happy order misses the core asynchronous race.
+
+<div class="page-break"></div>
+
+## 18. Deep study plate: client session order
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant C as Client queue
+    participant R as Replica
+    App->>C: write x=7
+    App->>C: read x
+    C->>R: start write P1
+    R-->>C: WriteResult P1
+    C->>R: only now start read P2
+    R-->>C: ReadResult P2 = 7
+```
+
+This order supports a read-your-own-write argument when write completion
+actually means the contacted replica has applied the commit. The queue cannot
+repair a premature server callback. Therefore, client ordering and replica
+completion semantics must be proved together.
+
+A different client may issue a read concurrently and observe a different legal
+point in the global sequential history. Sequential consistency preserves each
+client's order; it does not require wall-clock real-time order between clients.
+
+<div class="page-break"></div>
+
+## 19. Deep study plate: target selection and failures
+
+```mermaid
+flowchart TD
+    Head[Head request] --> Select[Select replica]
+    Select --> Send[Send directly or through required path]
+    Send --> Outcome{Outcome}
+    Outcome -->|result| Complete[callback and dequeue]
+    Outcome -->|client timeout| Uncertain[report uncertainty and dequeue]
+    Outcome -->|target crash| Timeout[wait for defined failure behavior]
+```
+
+Target selection affects latency and observable state. A read is local to its
+target. A write sent to a follower creates a wrapper that reaches the
+coordinator. Replica-to-replica traffic must use `NetworkChannel`, while the
+client boundary follows the project's explicit API path. Mixing these paths
+can accidentally add delay twice or bypass FIFO emulation.
+
+After target crash, the client may know only that no response arrived. Do not
+invent a rollback result. A timeout is an uncertainty outcome unless the
+protocol provides stronger evidence.
+
+<div class="page-break"></div>
+
+## 20. Deep study plate: retries need operation identity
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant Old as Old coordinator
+    participant New as New coordinator
+    C->>Old: write operation K
+    Old->>Old: may commit K
+    Old--xC: result lost
+    C->>New: retry operation K
+    New->>New: deduplicate or reconcile K
+    New-->>C: one logical outcome
+```
+
+Without a stable operation key, the retry looks like a new write. Assignment
+may be harmless for the same value but callbacks and sequence history still
+duplicate. The current reports should not claim exactly-once client semantics
+unless the code stores and recognizes such keys across coordinator change.
+
+For exam discussion, separate request ID, transaction ID, and update epoch.
+A retry may create a new transaction while retaining a logical operation ID;
+the inspected implementation may not yet model that distinction.
+
+<div class="page-break"></div>
+
+## 21. Student workbook: client observability
+
+```mermaid
+mindmap
+  root((Client contract))
+    Queue
+      FIFO per client
+      One active request
+    Identity
+      Fresh TransactionId
+      Match every callback
+    Terminal paths
+      Result
+      Timeout
+      Exactly one cleanup
+    Limits
+      Timeout is uncertainty
+      Retry may duplicate
+```
+
+Trace queue contents, active ID, timer generation, and emitted callbacks after
+every event. Add foreign-result, duplicate-result, result-after-timeout, and
+timeout-after-result tests. Explain why silence from the wrong ID is correct
+behavior, while silence from the matching healthy request may be a liveness
+failure.

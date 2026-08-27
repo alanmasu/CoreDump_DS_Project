@@ -330,5 +330,74 @@ which null is legal and the guard that prevents earlier use.</p>
 <p>Construct two histories that produce the same final <code>positions[]</code> array but
 have different update order. Explain why a recovery algorithm that copies only
 the array cannot distinguish them, then name the metadata it should transfer.</p>
+<div class="page-break"></div>
+<h2>17. Deep study plate: four views of replica state</h2>
+<div class="mermaid-image"><img src="mermaid/04_replicated_state_epochs_and_history-01.png" alt="Rendered Mermaid diagram 1" /></div>
+<p>Protocol control state says whether the replica is a coordinator, follower,
+electing, or synchronizing. Ordering state assigns meaning to update IDs.
+Materialized state answers current reads. History explains how the replica
+reached that materialized value and which incomplete work it observed. Debugging
+only the array hides the evidence needed for recovery.</p>
+<p>Write each layer separately in a trace. A follower may have observed pair 3:7
+without applying it, so its history knowledge is newer than its visible array.
+That is not automatically an inconsistency; it is an intermediate protocol
+state that must be resolved by WRITEOK or recovery.</p>
+<div class="page-break"></div>
+<h2>18. Deep study plate: lexicographic epoch ordering</h2>
+<div class="mermaid-image"><img src="mermaid/04_replicated_state_epochs_and_history-02.png" alt="Rendered Mermaid diagram 2" /></div>
+<p>Compare term first, then sequence. Pair 3:0 is newer than 2:999 because term 3
+represents a later coordinator generation. Within term 3, only its coordinator
+should assign increasing sequence numbers. This rule gives a total comparison;
+it does not guarantee that all numbers were assigned correctly or that gaps
+are safe.</p>
+<p>Document the initial pair. If the field begins null, name the transition that
+creates the first real pair and reject comparison before it. A sentinel such
+as 0:0 simplifies code only if the specification reserves that meaning.</p>
+<div class="page-break"></div>
+<h2>19. Deep study plate: observed versus committed</h2>
+<div class="mermaid-image"><img src="mermaid/04_replicated_state_epochs_and_history-03.png" alt="Rendered Mermaid diagram 3" /></div>
+<p>An observed update is recovery evidence, not necessarily a readable value. A
+committed update has crossed the protocol’s visibility boundary. Conflating
+the two lets a follower expose an update that may later be discarded or lets
+recovery erase an update that was already visible somewhere.</p>
+<p>History entries should therefore carry status or live in collections whose
+meaning is explicit. A mutable <code>UpdateTransaction</code> object is a poor durable
+record because later FSM transitions can rewrite what history appears to say.
+Prefer immutable update records containing pair, index, value, and status.</p>
+<div class="page-break"></div>
+<h2>20. Deep study plate: two equal snapshots, different histories</h2>
+<div class="mermaid-image"><img src="mermaid/04_replicated_state_epochs_and_history-04.png" alt="Rendered Mermaid diagram 4" /></div>
+<p>Snapshots collapse history. This is useful for efficient reads but dangerous
+for proving update order. In history A, another replica may have acknowledged
+the first update; in history B, that identity never existed. Copying x=9 makes
+arrays converge yet cannot reconstruct which callbacks, retries, or incomplete
+quorum decisions remain valid.</p>
+<p>Snapshot synchronization can still be part of a correct design when paired
+with a checkpoint certificate or a retained suffix of ordered history. The
+inspected code should be described according to what it actually transfers,
+not what a complete recovery protocol might transfer.</p>
+<div class="page-break"></div>
+<h2>21. Deep study plate: idempotent materialization</h2>
+<div class="mermaid-image"><img src="mermaid/04_replicated_state_epochs_and_history-05.png" alt="Rendered Mermaid diagram 5" /></div>
+<p>The order of state mutation and history marking must survive duplicate
+delivery and crashes at simulated injection points. Within one actor turn the
+two Java operations are serialized, but the crash model may intentionally stop
+between logical steps. Tests should assert one visible mutation and one
+history entry after duplicate WRITEOK.</p>
+<p>If application is simply assigning a value, applying twice looks harmless.
+Do not rely on that accident: callbacks, sequence advancement, and future
+operations may not be idempotent. The protocol should enforce at-most-once by
+identity.</p>
+<div class="page-break"></div>
+<h2>22. Student workbook: design a recovery record</h2>
+<div class="mermaid-image"><img src="mermaid/04_replicated_state_epochs_and_history-06.png" alt="Rendered Mermaid diagram 6" /></div>
+<p>Propose an immutable record and justify every field. Decide whether ACK sender
+sets belong in every replica’s record or only coordinator recovery evidence.
+Define equality so duplicate messages find the same logical update. Then write
+invariants: one payload per pair, monotonic status, committed records applied
+once, and no newer-term write before required old-term recovery completes.</p>
+<p>Finally, compare that design with the inspected branch. Mark implemented
+fields, nullable fields, and missing transitions. This comparison is more
+educational than presenting ideal pseudocode as if it were current behavior.</p>
 </body>
 </html>

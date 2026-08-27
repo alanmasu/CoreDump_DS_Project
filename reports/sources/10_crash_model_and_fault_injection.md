@@ -199,3 +199,148 @@ did not do and what the survivors did do.
 For each crash category, choose one message that may complete before the crash
 and one that must be rejected after it. Explain why the answer changes when the
 crash is injected before versus after a WRITEOK.
+
+<div class="page-break"></div>
+
+## 17. Deep study plate: crash status lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> NONE
+    NONE --> PENDING: configure category and count
+    PENDING --> PENDING: nonmatching event
+    PENDING --> CRASHED: matching occurrence reaches count
+    CRASHED --> CRASHED: all later protocol entry ignored
+```
+
+`PENDING` makes injection repeatable: the test names a semantic event and an
+occurrence count rather than racing a wall-clock sleep. The transition to
+`CRASHED` should be observable through a callback or status probe so the next
+test action starts from known state.
+
+Document whether the triggering event completes before the crash takes effect.
+“Crash on first WRITEOK” is ambiguous unless the implementation says before
+send, after send, before apply, or after apply.
+
+<div class="page-break"></div>
+
+## 18. Deep study plate: entry-point audit
+
+```mermaid
+flowchart TD
+    In[Actor receives event] --> Type{Entry type}
+    Type --> Net[network message]
+    Type --> Timer[local timer]
+    Type --> Self[self message]
+    Type --> Client[client request]
+    Net --> Guard{CRASHED?}
+    Timer --> Guard
+    Self --> Guard
+    Client --> Guard
+    Guard -->|yes| Ignore[no output or mutation]
+    Guard -->|no| Handle[normal dispatch]
+```
+
+Use the receive builder as an audit checklist. A central guard is easier to
+reason about, but special handlers may run before it. Trace callbacks too: a
+crashed actor must not report update application or election success from a
+queued event.
+
+The stable ActorRef is a testing convenience. Do not confuse addressability
+with liveness; messages can still be sent to a simulated dead node and then
+ignored.
+
+<div class="page-break"></div>
+
+## 19. Deep study plate: occurrence counting
+
+```mermaid
+sequenceDiagram
+    participant T as Test
+    participant R as Replica
+    T->>R: crash on second UPDATE
+    R->>R: first UPDATE, count=1, continue
+    R->>R: unrelated heartbeat, count unchanged
+    R->>R: second UPDATE, count=2
+    R->>R: transition CRASHED at documented point
+    R-->>T: crash callback
+```
+
+Count only the selected semantic category. If helper methods increment at
+slightly different positions across feature branches, the same test name can
+inject different windows. Reports must tie the category to concrete code and
+branch provenance.
+
+Reset counters between tests and avoid static mutable instrumentation. Otherwise
+execution order changes the injected failure.
+
+<div class="page-break"></div>
+
+## 20. Deep study plate: crash windows in an update
+
+```mermaid
+flowchart LR
+    A[before UPDATE send] --> B[after UPDATE before ACK]
+    B --> C[after quorum]
+    C --> D[after some WRITEOK]
+    D --> E[after local apply]
+```
+
+Each edge produces a different recovery obligation. Before dissemination,
+survivors may know nothing. After quorum, a majority contains evidence. After
+one correct replica applies, uniform agreement requires eventual preservation.
+After local apply but before callback, client knowledge and system state differ.
+
+Name the chosen window in every test assertion. “Coordinator crash test” is too
+broad to explain what property was exercised.
+
+<div class="page-break"></div>
+
+## 21. Deep study plate: deterministic observation
+
+```mermaid
+sequenceDiagram
+    participant Test as TestKit probe
+    participant R as Target replica
+    participant S as Survivors
+    Test->>R: configure crash point
+    Test->>S: trigger protocol
+    R-->>Test: callback crash reached
+    S-->>Test: election/update callbacks
+    Test->>Test: assert no forbidden callback from R
+```
+
+Positive and negative observations belong together. Verify the crash occurred,
+the dead actor stopped output, and survivors made the expected progress. Use a
+bound derived from protocol delay rather than an arbitrary long sleep.
+
+TestKit silence assertions should be scoped narrowly: too short misses late
+violations, while too long slows the suite without adding evidence.
+
+<div class="page-break"></div>
+
+## 22. Student workbook: fault campaign
+
+```mermaid
+mindmap
+  root((Crash campaign))
+    Role
+      coordinator
+      follower
+      best election candidate
+    Phase
+      prepare
+      quorum
+      commit
+      synchronization
+    Observation
+      stopped output
+      survivor progress
+      state convergence
+      callback count
+```
+
+Choose one leaf from each branch and form a scenario. Record initial state,
+exact injection transition, allowed final states, and forbidden output. Repeat
+the same scenario on the relevant feature ref because crash-category placement
+may differ across branches.

@@ -355,5 +355,60 @@ and tests for each branch.</p>
 follower. Which replicas may serve reads? Which epoch should the second
 election advertise? Answer using explicit state, not the wall-clock order of
 messages.</p>
+<div class="page-break"></div>
+<h2>17. Deep study plate: recovery barrier</h2>
+<div class="mermaid-image"><img src="mermaid/12_recovery_synchronization_and_epoch_transition-01.png" alt="Rendered Mermaid diagram 1" /></div>
+<p>Coordinator election is not the readiness transition. New writes remain behind
+a barrier until the new term has a state that preserves required old-term
+updates. The precise acknowledgement condition should be explicit; merely
+sending synchronization does not prove recipients installed it.</p>
+<p>Reads need a documented policy during the barrier. Serving a stable old
+snapshot may be legal in some histories, while serving a partially installed
+snapshot may not.</p>
+<div class="page-break"></div>
+<h2>18. Deep study plate: synchronization message validation</h2>
+<div class="mermaid-image"><img src="mermaid/12_recovery_synchronization_and_epoch_transition-02.png" alt="Rendered Mermaid diagram 2" /></div>
+<p>Array length, immutable copy, ordered history, and term identity are protocol
+validation, not defensive extras. A valid transaction ID alone does not prove
+the sender won the election. After installation, old transaction FSMs and
+timers must be cleaned up before heartbeat restarts.</p>
+<p>Copy incoming arrays and collections so later sender mutation cannot change
+installed state outside the receiver’s mailbox.</p>
+<div class="page-break"></div>
+<h2>19. Deep study plate: snapshot plus history</h2>
+<div class="mermaid-image"><img src="mermaid/12_recovery_synchronization_and_epoch_transition-03.png" alt="Rendered Mermaid diagram 3" /></div>
+<p>The snapshot supports immediate materialized reads. History supports ordering,
+deduplication, and audit of past decisions. Pending evidence supports recovery
+of a quorum or partial WRITEOK window. A complete design may checkpoint old
+history, but then the checkpoint needs an explicit safety meaning.</p>
+<p>The inspected election branch primarily copies position state. Report this as
+snapshot synchronization and keep full history replay as a limitation unless
+the exact code path proves otherwise.</p>
+<div class="page-break"></div>
+<h2>20. Deep study plate: epoch transition</h2>
+<div class="mermaid-image"><img src="mermaid/12_recovery_synchronization_and_epoch_transition-04.png" alt="Rendered Mermaid diagram 4" /></div>
+<p>A newer term orders all its updates after older terms, but that ordering cannot
+erase unresolved old work. Resolve or carry the evidence first, then establish
+the new sequence baseline. Every survivor must install the same coordinator and
+term before accepting its messages.</p>
+<p>Queued term-4 UPDATE, ACK, WRITEOK, heartbeat, and election timeout messages may
+still arrive. Sender, epoch, transaction, state, and generation checks make
+them harmless.</p>
+<div class="page-break"></div>
+<h2>21. Deep study plate: winner fails during synchronization</h2>
+<div class="mermaid-image"><img src="mermaid/12_recovery_synchronization_and_epoch_transition-05.png" alt="Rendered Mermaid diagram 5" /></div>
+<p>The second election must not choose using numeric ID alone. R1 may be the only
+survivor that installed the first winner’s state. The protocol needs a way to
+advertise that freshness without treating a half-installed term as permission
+for arbitrary new writes.</p>
+<p>This scenario exposes why “callbacks on every survivor” and synchronization
+acknowledgements are useful test evidence.</p>
+<div class="page-break"></div>
+<h2>22. Student workbook: recovery audit</h2>
+<div class="mermaid-image"><img src="mermaid/12_recovery_synchronization_and_epoch_transition-06.png" alt="Rendered Mermaid diagram 6" /></div>
+<p>For each item, point to implementation evidence or mark it as an unmet
+requirement. Then build a trace beginning with partial WRITEOK, followed by two
+coordinator failures. The trace is safe only if required update knowledge
+survives both transitions.</p>
 </body>
 </html>

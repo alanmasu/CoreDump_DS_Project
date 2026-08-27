@@ -326,5 +326,58 @@ on one lucky random run.</p>
 sends one. The wrong message must not reset the timer. Add a second test that
 delivers an old watchdog version after a fresh heartbeat and proves no duplicate
 election request is emitted.</p>
+<div class="page-break"></div>
+<h2>17. Deep study plate: one FSM per replica</h2>
+<div class="mermaid-image"><img src="mermaid/09_heartbeat_and_silent_failure_detection-01.png" alt="Rendered Mermaid diagram 1" /></div>
+<p>Shared identity lets corresponding local FSMs route the same protocol term.
+It does not imply shared mutable state. Each follower owns its timer and version;
+the coordinator owns its periodic tick. Creating a separate arbitrary ID on
+every replica would prevent incoming heartbeat messages from finding the local
+FSM.</p>
+<p>At initialization, verify that every replica installs one heartbeat FSM with
+the coordinator-scoped ID and then chooses its local role from coordinator
+identity.</p>
+<div class="page-break"></div>
+<h2>18. Deep study plate: coordinator periodic broadcast</h2>
+<div class="mermaid-image"><img src="mermaid/09_heartbeat_and_silent_failure_detection-02.png" alt="Rendered Mermaid diagram 2" /></div>
+<p>The tick is local and should not travel through <code>NetworkChannel</code>. The heartbeat
+message is remote and must use it. Separating the two message types prevents a
+follower from accidentally handling a coordinator’s scheduling instruction.</p>
+<p>After a simulated coordinator crash, queued ticks may still arrive. The crash
+guard and role/state checks must stop new broadcasts. Otherwise, a logically
+dead coordinator keeps followers alive.</p>
+<div class="page-break"></div>
+<h2>19. Deep study plate: follower watchdog reset</h2>
+<div class="mermaid-image"><img src="mermaid/09_heartbeat_and_silent_failure_detection-03.png" alt="Rendered Mermaid diagram 3" /></div>
+<p>Only heartbeats from the expected coordinator reset the watchdog. A stale old
+coordinator or arbitrary replica must not suppress detection. On expiry, the
+FSM validates current version and role, then transfers responsibility to the
+election subsystem once.</p>
+<p>Synchronization must restart heartbeat with the newly elected coordinator and
+invalidate old timers. Carrying the old role into a new term can make two
+coordinators broadcast or make the new coordinator monitor itself.</p>
+<div class="page-break"></div>
+<h2>20. Deep study plate: versioned cancellation</h2>
+<div class="mermaid-image"><img src="mermaid/09_heartbeat_and_silent_failure_detection-04.png" alt="Rendered Mermaid diagram 4" /></div>
+<p>Cancellation is best effort because the scheduler may already have delivered
+to the mailbox. Comparing the payload version at handling time closes this
+race. Nulling a timer handle does not identify which queued event fired.</p>
+<p>Use the same reasoning for repeated restarts: each generation must be greater
+than all events created by the previous coordinator role.</p>
+<div class="page-break"></div>
+<h2>21. Deep study plate: timing envelope</h2>
+<div class="mermaid-image"><img src="mermaid/09_heartbeat_and_silent_failure_detection-05.png" alt="Rendered Mermaid diagram 5" /></div>
+<p>The watchdog must exceed heartbeat period plus worst configured delivery and
+reasonable scheduler margin. Derive this from constants used by the fixture.
+A test with zero delay cannot validate the production bound.</p>
+<p>False suspicion is excluded by the assignment’s assumptions, but the
+implementation still needs constants consistent with that assumption. If
+healthy configured delays exceed the watchdog, the model violates itself.</p>
+<div class="page-break"></div>
+<h2>22. Student workbook: heartbeat fault matrix</h2>
+<div class="mermaid-image"><img src="mermaid/09_heartbeat_and_silent_failure_detection-06.png" alt="Rendered Mermaid diagram 6" /></div>
+<p>For every leaf, define the initial role, ID, version, incoming sender, and
+expected callback/message count. Include negative assertions: no watchdog reset
+for wrong sender and no second election request for repeated stale expiries.</p>
 </body>
 </html>

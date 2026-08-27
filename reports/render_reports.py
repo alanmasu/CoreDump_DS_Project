@@ -20,6 +20,7 @@ from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
@@ -28,8 +29,10 @@ from reportlab.platypus import (
     ListFlowable,
     ListItem,
     PageTemplate,
+    PageBreak,
     Paragraph,
     Preformatted,
+    Image as ReportImage,
     Spacer,
     Table,
     TableStyle,
@@ -120,6 +123,7 @@ def descendants(node: Node, tag: str) -> list[Node]:
 class ReportRenderer:
     def __init__(self, title: str):
         self.title = title
+        self.base_dir = Path.cwd()
         base = getSampleStyleSheet()
         self.styles = {
             "h1": ParagraphStyle("ReportH1", parent=base["Title"], fontName="Helvetica-Bold", fontSize=22, leading=25, textColor=colors.HexColor("#173f5f"), spaceAfter=10, keepWithNext=True),
@@ -190,6 +194,34 @@ class ReportRenderer:
         table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), bg), ("BOX", (0, 0), (-1, -1), 0.7, colors.HexColor("#9bc2d2")), ("LEFTPADDING", (0, 0), (-1, -1), 8), ("RIGHTPADDING", (0, 0), (-1, -1), 8), ("TOPPADDING", (0, 0), (-1, -1), 7), ("BOTTOMPADDING", (0, 0), (-1, -1), 7)]))
         return table
 
+    def image_flowable(self, node: Node):
+        source = node.attrs.get("src", "")
+        if source.startswith("file://"):
+            source = source[7:]
+        path = Path(source)
+        if not path.is_absolute():
+            path = self.base_dir / path
+        width_px, height_px = ImageReader(str(path)).getSize()
+        max_width = 168 * mm
+        max_height = 140 * mm
+        scale = min(max_width / width_px, max_height / height_px)
+        image_flow = ReportImage(str(path), width=width_px * scale, height=height_px * scale)
+        image_flow.hAlign = "CENTER"
+        frame = Table([[image_flow]], colWidths=[width_px * scale + 12])
+        frame.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#fbfdfe")),
+            ("BOX", (0, 0), (-1, -1), 0.55, colors.HexColor("#bed3df")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        return KeepTogether([
+            Spacer(1, 4),
+            frame,
+            Spacer(1, 6),
+        ])
+
     def flowables(self, nodes: list[Node | str]) -> list:
         result = []
         for node in nodes:
@@ -210,6 +242,8 @@ class ReportRenderer:
             elif node.tag == "pre":
                 result.append(self.pre_flowable(node))
                 result.append(Spacer(1, 5))
+            elif node.tag == "img":
+                result.append(self.image_flowable(node))
             elif node.tag in {"ul", "ol"}:
                 result.append(self.list_flowable(node, node.tag == "ol"))
                 result.append(Spacer(1, 3))
@@ -220,6 +254,9 @@ class ReportRenderer:
                 result.append(HRFlowable(width="100%", thickness=0.7, color=colors.HexColor("#bed3df"), spaceBefore=6, spaceAfter=8))
             elif node.tag == "div":
                 class_name = node.attrs.get("class", "")
+                if "page-break" in class_name:
+                    result.append(PageBreak())
+                    continue
                 body = [x for x in self.flowables(node.children) if x is not None]
                 if "callout" in class_name:
                     box = Table([[body]], colWidths=[None])
@@ -232,6 +269,7 @@ class ReportRenderer:
         return result
 
     def build(self, html_path: Path, pdf_path: Path) -> None:
+        self.base_dir = html_path.parent
         parser = TreeParser()
         parser.feed(html_path.read_text(encoding="utf-8"))
         body = find_tag(parser.root, "body") or parser.root

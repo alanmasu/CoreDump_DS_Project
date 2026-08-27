@@ -391,5 +391,56 @@ configured channel delay plus protocol hops and explain the margin.</p>
 <p>Choose one claim from each of the read, heartbeat, election, and recovery
 reports. For each, write what a unit test can establish and what integration or
 formal reasoning is still needed.</p>
+<div class="page-break"></div>
+<h2>20. Deep study plate: evidence ladder</h2>
+<div class="mermaid-image"><img src="mermaid/13_observability_testing_and_verification-01.png" alt="Rendered Mermaid diagram 1" /></div>
+<p>Higher rungs add scope but do not replace reasoning. A green regression can
+miss an unasserted property; a formal invariant can be implemented incorrectly.
+Strong documentation names both mechanism and observation, plus the commit and
+environment on which evidence was collected.</p>
+<p>Do not turn an environment failure before compilation into a passing test. The
+native-platform Gradle error, for example, means test execution was blocked.</p>
+<div class="page-break"></div>
+<h2>21. Deep study plate: read a test backwards</h2>
+<div class="mermaid-image"><img src="mermaid/13_observability_testing_and_verification-02.png" alt="Rendered Mermaid diagram 2" /></div>
+<p>Starting at the assertion prevents test names from substituting for evidence.
+Open helpers in <code>TestsCommons</code> to see membership size, coordinator choice, delay
+bounds, and initialization. Then check negative assertions and callback counts.</p>
+<p>A test expecting one message proves presence. To prove exactly once, it also
+needs a bounded absence check after duplicate or late inputs.</p>
+<div class="page-break"></div>
+<h2>22. Deep study plate: deterministic protocol tests</h2>
+<div class="mermaid-image"><img src="mermaid/13_observability_testing_and_verification-03.png" alt="Rendered Mermaid diagram 3" /></div>
+<p>Prefer injected events and TestKit expectations to arbitrary sleep. If time is
+the behavior under test, derive the expectation window from channel and timer
+configuration. Keep random delay deterministic through a seed or bounded
+fixture when debugging failures.</p>
+<p>Record both state and output where possible. A callback without a changed
+position may reveal a false-success path.</p>
+<div class="page-break"></div>
+<h2>23. Deep study plate: build and static analysis</h2>
+<div class="mermaid-image"><img src="mermaid/13_observability_testing_and_verification-04.png" alt="Rendered Mermaid diagram 4" /></div>
+<p>Each task answers a different question. Compilation checks types; regression
+checks configured scenarios; callback contract checks reachability of required
+observations; static tools identify patterns; coverage identifies executed code
+but not correctness. Report their results separately.</p>
+<p>Tie CI evidence to an exact commit. A passing earlier head does not certify a
+later change, and an in-progress remote job is not a pass.</p>
+<div class="page-break"></div>
+<h2>24. Deep study plate: coverage by subsystem</h2>
+<div class="mermaid-image"><img src="mermaid/13_observability_testing_and_verification-05.png" alt="Rendered Mermaid diagram 5" /></div>
+<p>File coverage is not line coverage. The map ensures every maintained area has
+a report and verification discussion. Within each area, trace branches for
+success, timeout, malformed input, duplicate traffic, crash state, and stale
+events.</p>
+<p>Generated build outputs are evidence artifacts, not maintained source. Keep
+them out of conceptual coverage counts unless a report cites a specific result.</p>
+<div class="page-break"></div>
+<h2>25. Student workbook: build an evidence table</h2>
+<div class="mermaid-image"><img src="mermaid/13_observability_testing_and_verification-06.png" alt="Rendered Mermaid diagram 6" /></div>
+<p>Create one row for every major claim in the other fourteen reports. If a row
+lacks a mechanism, weaken the claim. If it lacks a test, label it reasoned or
+pending. If the code exists only on a feature branch, preserve that provenance
+instead of presenting an integrated pass.</p>
 </body>
 </html>

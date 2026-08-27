@@ -329,5 +329,77 @@ field (for example, a generation/version) lets the handler reject it?</li>
 <li>In a test, how would you distinguish “the message was delayed” from “the
 receiver crashed” without sleeping for an arbitrary number of seconds?</li>
 </ol>
+<div class="page-break"></div>
+<h2>18. Deep study plate: the channel matrix</h2>
+<div class="mermaid-image"><img src="mermaid/02_communication_fifo_and_time-01.png" alt="Rendered Mermaid diagram 1" /></div>
+<p>Model the network as a matrix of directed queues. <code>A→B</code> and <code>B→A</code> are
+different channels, as are <code>A→B</code> and <code>C→B</code>. FIFO says messages leave one cell
+of that matrix in insertion order. It says nothing about which cell delivers
+next. This mental model makes cross-sender interleavings obvious and prevents
+the mistaken claim that one receiver mailbox sees a global send order.</p>
+<p>For every protocol assumption, write its scope. Reliable means the simulated
+channel eventually delivers unless the receiver’s crash behavior ignores it.
+FIFO means same source and destination. Random delay means a scheduled arrival,
+not packet loss. Sender preservation means the receiver can validate who
+originated the message even though the channel performed the physical <code>tell</code>.</p>
+<div class="page-break"></div>
+<h2>19. Deep study plate: queue scheduling</h2>
+<div class="mermaid-image"><img src="mermaid/02_communication_fifo_and_time-02.png" alt="Rendered Mermaid diagram 2" /></div>
+<p>The safe implementation pattern schedules only the head of a directed queue.
+When delivery completes, it removes that envelope and schedules the next.
+Scheduling every message independently with a random delay could let m2’s
+shorter delay overtake m1, violating FIFO. When reading <code>NetworkChannel</code>, find
+the data structure that represents this responsibility handoff.</p>
+<p>Sender identity is part of the envelope. If delivery uses the channel actor as
+the sender, a participant cannot distinguish the coordinator from a follower.
+If it uses <code>noSender</code>, sender validation becomes impossible. A channel wrapper
+must therefore preserve the logical sender when it finally calls the target.</p>
+<div class="page-break"></div>
+<h2>20. Deep study plate: timers live outside the channel</h2>
+<div class="mermaid-image"><img src="mermaid/02_communication_fifo_and_time-03.png" alt="Rendered Mermaid diagram 3" /></div>
+<p>The mailbox is the meeting point of independent time sources. A timeout and a
+network result may be queued close together; wall-clock timestamps do not
+decide correctness. The FSM state and generation decide which event still has
+authority. Whichever terminal event is processed first clears the active
+transaction; the later one becomes stale.</p>
+<p>Cancellation cannot retract an event already queued in the mailbox. This is
+why heartbeat uses <code>watchdogVersion</code>, and why other retry timers benefit from
+attempt IDs. Treat the timer payload like any remote message: validate it when
+consumed.</p>
+<div class="page-break"></div>
+<h2>21. Deep study plate: calculate a timeout budget</h2>
+<div class="mermaid-image"><img src="mermaid/02_communication_fifo_and_time-04.png" alt="Rendered Mermaid diagram 4" /></div>
+<p>Let the maximum configured one-hop delay be <code>L</code>. An UPDATE/ACK round trip needs
+about <code>2L</code>, while a final WRITEOK adds another <code>L</code> before a remote participant
+applies. Processing, scheduler jitter, and test-probe delivery need additional
+margin. This gives a reasoned lower bound; it is not a promise that the JVM
+always schedules exactly at that instant.</p>
+<p>For heartbeat, the bound includes heartbeat period plus delivery delay. A
+watchdog shorter than that sum creates false suspicions in a healthy execution.
+A watchdog many times larger preserves safety but slows liveness. Report both
+trade-offs instead of presenting a constant without its units or derivation.</p>
+<div class="page-break"></div>
+<h2>22. Deep study plate: stale-event race</h2>
+<div class="mermaid-image"><img src="mermaid/02_communication_fifo_and_time-05.png" alt="Rendered Mermaid diagram 5" /></div>
+<p>This race is deterministic enough to test. Construct the older expiry
+message, process a valid heartbeat that advances the version, and then inject
+the old message. The absence of an election callback is the important
+assertion. A test that only checks cancellation returns successfully does not
+exercise the queued-event problem.</p>
+<p>The same pattern applies to election neighbor retries: a timeout for attempt 2
+must not invalidate an ACK for attempt 3. Name generations according to their
+scope (<code>watchdogVersion</code>, <code>attempt</code>) rather than using one global counter with
+ambiguous meaning.</p>
+<div class="page-break"></div>
+<h2>23. Student workbook: legal and illegal histories</h2>
+<div class="mermaid-image"><img src="mermaid/02_communication_fifo_and_time-06.png" alt="Rendered Mermaid diagram 6" /></div>
+<p>For each trace, mark channel keys rather than actor names alone. Then decide
+whether an ordering is illegal. Create a trace where A sends m1 then m2 to B,
+while C sends x to B. Legal deliveries include m1,x,m2 and x,m1,m2; m2 before
+m1 is illegal. Repeat with A sending m1 to B and m2 to C: either delivery may
+occur first because the destination changed.</p>
+<p>Finish by designing three tests: FIFO under contrasting random delays, sender
+preservation, and stale local timer rejection. Explain what each test proves
+and what it does not prove about total-order broadcast.</p>
 </body>
 </html>

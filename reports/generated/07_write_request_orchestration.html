@@ -324,5 +324,63 @@ them as wrapper tests and pair them with integration tests for the child.</p>
 <p>Draw the three races above and label which actor owns each timer. Then explain
 why a client retry needs an idempotency key if the first child may have already
 committed after the parent timed out.</p>
+<div class="page-break"></div>
+<h2>16. Deep study plate: wrapper boundaries</h2>
+<div class="mermaid-image"><img src="mermaid/07_write_request_orchestration-01.png" alt="Rendered Mermaid diagram 1" /></div>
+<p>The wrapper translates a simple client operation into a distributed protocol.
+The parent cares about one terminal result and deadline; the child cares about
+coordinator routing, quorum, epochs, and WRITEOK. A wrapper test can validate
+translation even when the child is replaced by an injected completion message.
+It cannot prove the quorum protocol.</p>
+<p>Identify the owner of every arrow. Objects remain local; only messages cross
+actor boundaries. This prevents accidental assumptions that the client and
+replica share one mutable <code>WriteTransaction</code> instance.</p>
+<div class="page-break"></div>
+<h2>17. Deep study plate: ID translation</h2>
+<div class="mermaid-image"><img src="mermaid/07_write_request_orchestration-02.png" alt="Rendered Mermaid diagram 2" /></div>
+<p>The mapping is protocol state. It should be installed before child work can
+complete, removed exactly once, and rejected if a foreign child ID arrives.
+Logging both IDs on every transition makes branch-level tests far easier to
+interpret.</p>
+<p>If multiple parent writes can coexist at a replica, a single <code>writeId</code> field is
+insufficient. The active transaction map or explicit correlation map must keep
+each relationship separate.</p>
+<div class="page-break"></div>
+<h2>18. Deep study plate: contacting a follower</h2>
+<div class="mermaid-image"><img src="mermaid/07_write_request_orchestration-03.png" alt="Rendered Mermaid diagram 3" /></div>
+<p>The follower is not allowed to invent the global order. It forwards the update
+to the current coordinator and later participates like other replicas. The
+client result should not be sent merely because forwarding succeeded; it must
+wait for the child completion condition defined by the update protocol.</p>
+<p>Coordinator changes complicate this path. A stored coordinator reference may
+be stale, so timeout and election integration must define whether the wrapper
+waits, retries, or reports uncertainty.</p>
+<div class="page-break"></div>
+<h2>19. Deep study plate: three completion races</h2>
+<div class="mermaid-image"><img src="mermaid/07_write_request_orchestration-04.png" alt="Rendered Mermaid diagram 4" /></div>
+<p>Every terminal path must remove parent-child correlation, invalidate timers,
+emit at most one callback, and release the client queue. Model these effects as
+one termination routine or prove equivalent guards in each handler.</p>
+<p>Test a finish and timeout in both orders. Then inject a second finish. The
+expected result is not an exception; it is stable terminal state and one
+observable callback.</p>
+<div class="page-break"></div>
+<h2>20. Deep study plate: what wrapper tests establish</h2>
+<div class="mermaid-image"><img src="mermaid/07_write_request_orchestration-05.png" alt="Rendered Mermaid diagram 5" /></div>
+<p>This evidence boundary should appear in every report that cites
+<code>TestWriteTransaction</code>. A test double is valuable because it isolates the
+parent. Integration tests must later run a real child across several replicas
+and verify both callbacks and state.</p>
+<p>When a test manually manufactures completion, inspect whether it could create
+an impossible sender or ID. A permissive wrapper might pass the test yet accept
+messages no real child should be able to send.</p>
+<div class="page-break"></div>
+<h2>21. Student workbook: design the wrapper contract</h2>
+<div class="mermaid-image"><img src="mermaid/07_write_request_orchestration-06.png" alt="Rendered Mermaid diagram 6" /></div>
+<p>Write preconditions and postconditions for parent start, child completion, and
+parent timeout. Include the mapping state in each postcondition. Then draw a
+trace in which the client times out but the child commits later; explain why
+the callback remains timeout and why replicated recovery must still preserve
+the update.</p>
 </body>
 </html>

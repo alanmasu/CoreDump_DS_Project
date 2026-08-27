@@ -231,3 +231,150 @@ orders for the same logical history.
 For three, five, and six replicas, calculate the strict-majority threshold and
 the maximum number of failures tolerated before progress stops. Then write a
 test that delivers duplicate ACKs from one sender and proves they count once.
+
+<div class="page-break"></div>
+
+## 16. Deep study plate: coordinator sequencing
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Preparing: assign next EpochPair
+    Preparing --> WaitingQuorum: broadcast UPDATE
+    WaitingQuorum --> Committing: distinct ACK majority
+    Committing --> Done: broadcast WRITEOK and apply locally
+    WaitingQuorum --> Recovery: timeout or coordinator failure path
+```
+
+Only the active coordinator term may assign the next pair. Concurrent client
+writes therefore need serialization or an explicit rule that reserves unique
+sequence numbers before their broadcasts overlap. A mutable “current pair”
+shared by several coordinator FSMs can make ACKs or WRITEOKs refer to the wrong
+payload.
+
+Read coordinator code with a ledger: assigned pair, payload, ACK sender set,
+state, and timeout attempt. Every handler should mutate one row of that ledger,
+not a global field whose meaning changes when another update starts.
+
+<div class="page-break"></div>
+
+## 17. Deep study plate: strict-majority intersection
+
+```mermaid
+flowchart LR
+    Q1[Quorum A: R0 R1 R2] --> I[Intersection contains R2]
+    Q2[Quorum B: R2 R3 R4] --> I
+    I --> Evidence[At least one member carries prior evidence]
+```
+
+With five replicas, any two sets of three intersect. This mathematical fact
+supports recovery only if ACK knowledge is actually retained and election can
+prefer a candidate carrying it. Counting three messages is not enough when one
+sender can appear twice. Use a set keyed by stable replica identity and validate
+membership before insertion.
+
+For six replicas, the threshold is four; sets of three are not a strict
+majority. Write the formula `floor(N/2)+1` and calculate it rather than relying
+on a constant tailored to five-node tests.
+
+<div class="page-break"></div>
+
+## 18. Deep study plate: participant validation
+
+```mermaid
+flowchart TD
+    U[Incoming UPDATE] --> Sender{sender is current coordinator?}
+    Sender -->|no| Drop[reject]
+    Sender -->|yes| Pair{pair fresh and well formed?}
+    Pair -->|no| Drop
+    Pair -->|yes| Payload{pair has one stable payload?}
+    Payload -->|no| Conflict[reject conflicting reuse]
+    Payload -->|yes| Remember[record observed update and ACK]
+```
+
+Participant ACK is a promise that it can help recover this proposal. It should
+not acknowledge an invalid index, null pair, stale term, or conflicting payload.
+Sender validation ties sequencing authority to the installed coordinator.
+
+When UPDATE is retransmitted with the same pair and payload, idempotent ACK may
+be appropriate. The same pair with a different value is a protocol violation,
+not a newer update. Tests should distinguish these cases.
+
+<div class="page-break"></div>
+
+## 19. Deep study plate: WRITEOK materialization
+
+```mermaid
+sequenceDiagram
+    participant K as Coordinator
+    participant F as Follower
+    participant H as History
+    participant P as positions
+    K->>F: WRITEOK(pair)
+    F->>H: verify observed matching update
+    H-->>F: payload(index,value)
+    F->>P: setPosition(index,value)
+    F->>H: mark committed pair
+    F-->>K: optional completion evidence
+```
+
+The inspected update branch's termination path must be checked for the actual
+`setPosition` call. Advancing an epoch, appending history, and emitting a
+callback without changing materialized state creates a false success: the next
+read returns the old value.
+
+Commit identity also makes duplicate WRITEOK harmless. If the pair is already
+committed, do not apply, advance, or callback again. Validate that the stored
+payload belongs to the pair rather than trusting fields in a mutable FSM.
+
+<div class="page-break"></div>
+
+## 20. Deep study plate: coordinator crash windows
+
+```mermaid
+flowchart TD
+    Start[Update begins] --> W1[Before quorum]
+    W1 --> W2[After quorum before any WRITEOK]
+    W2 --> W3[WRITEOK at some replicas]
+    W3 --> W4[WRITEOK at all correct replicas]
+    W1 --> R1[may abandon or retry by defined rule]
+    W2 --> R2[quorum evidence must guide recovery]
+    W3 --> R3[uniform agreement requires completion]
+    W4 --> R4[new term retains committed history]
+```
+
+The recovery obligation grows across these windows. Once a correct replica has
+applied, losing the update violates uniform agreement. Before visibility, the
+protocol may have more freedom, but it must still avoid reusing the pair or
+producing contradictory callbacks.
+
+Tests should inject the crash at named transitions, not approximate them with
+sleep. Listener callbacks and controlled message injection make the window
+observable.
+
+<div class="page-break"></div>
+
+## 21. Student workbook: prove one update
+
+```mermaid
+mindmap
+  root((Update proof))
+    Identity
+      unique pair
+      stable payload
+    Quorum
+      strict majority
+      distinct senders
+    Commit
+      valid WRITEOK
+      apply once
+    Recovery
+      retained evidence
+      new-term barrier
+```
+
+Build a five-replica trace including duplicate ACK, delayed ACK after commit,
+duplicate WRITEOK, and one crashed follower. For every event, write the ACK set,
+FSM state, pair, and visible arrays. The exercise is complete only when you can
+explain why each ignored message is harmless and why the surviving majority
+still makes progress.

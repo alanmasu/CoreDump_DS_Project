@@ -213,3 +213,151 @@ Write a test where a wrong sender sends a heartbeat, then the real coordinator
 sends one. The wrong message must not reset the timer. Add a second test that
 delivers an old watchdog version after a fresh heartbeat and proves no duplicate
 election request is emitted.
+
+<div class="page-break"></div>
+
+## 17. Deep study plate: one FSM per replica
+
+```mermaid
+flowchart TB
+    Shared[Shared coordinator-scoped TransactionId] --> H0[Heartbeat FSM at coordinator]
+    Shared --> H1[Heartbeat FSM at follower 1]
+    Shared --> H2[Heartbeat FSM at follower 2]
+    H0 -->|HeartbeatMsg| H1
+    H0 -->|HeartbeatMsg| H2
+    H1 --> T1[local watchdog]
+    H2 --> T2[local watchdog]
+```
+
+Shared identity lets corresponding local FSMs route the same protocol term.
+It does not imply shared mutable state. Each follower owns its timer and version;
+the coordinator owns its periodic tick. Creating a separate arbitrary ID on
+every replica would prevent incoming heartbeat messages from finding the local
+FSM.
+
+At initialization, verify that every replica installs one heartbeat FSM with
+the coordinator-scoped ID and then chooses its local role from coordinator
+identity.
+
+<div class="page-break"></div>
+
+## 18. Deep study plate: coordinator periodic broadcast
+
+```mermaid
+sequenceDiagram
+    participant T as Coordinator tick
+    participant K as Coordinator FSM
+    participant N as NetworkChannel
+    participant F as Followers
+    T->>K: HeartbeatTick
+    K->>N: broadcast HeartbeatMsg
+    N->>F: delayed FIFO deliveries
+    K->>T: schedule next tick
+```
+
+The tick is local and should not travel through `NetworkChannel`. The heartbeat
+message is remote and must use it. Separating the two message types prevents a
+follower from accidentally handling a coordinator's scheduling instruction.
+
+After a simulated coordinator crash, queued ticks may still arrive. The crash
+guard and role/state checks must stop new broadcasts. Otherwise, a logically
+dead coordinator keeps followers alive.
+
+<div class="page-break"></div>
+
+## 19. Deep study plate: follower watchdog reset
+
+```mermaid
+stateDiagram-v2
+    [*] --> Watching
+    Watching --> Watching: valid heartbeat / version++ / reschedule
+    Watching --> Suspecting: current watchdog expires
+    Suspecting --> ElectionRequested: request exactly once
+    ElectionRequested --> Watching: synchronization installs new coordinator
+```
+
+Only heartbeats from the expected coordinator reset the watchdog. A stale old
+coordinator or arbitrary replica must not suppress detection. On expiry, the
+FSM validates current version and role, then transfers responsibility to the
+election subsystem once.
+
+Synchronization must restart heartbeat with the newly elected coordinator and
+invalidate old timers. Carrying the old role into a new term can make two
+coordinators broadcast or make the new coordinator monitor itself.
+
+<div class="page-break"></div>
+
+## 20. Deep study plate: versioned cancellation
+
+```mermaid
+sequenceDiagram
+    participant S as Scheduler
+    participant M as Follower mailbox
+    participant H as Heartbeat FSM
+    S->>M: queue WatchdogExpired v4
+    M->>H: valid heartbeat first
+    H->>H: current version becomes v5
+    M->>H: queued WatchdogExpired v4
+    H->>H: ignore stale version
+```
+
+Cancellation is best effort because the scheduler may already have delivered
+to the mailbox. Comparing the payload version at handling time closes this
+race. Nulling a timer handle does not identify which queued event fired.
+
+Use the same reasoning for repeated restarts: each generation must be greater
+than all events created by the previous coordinator role.
+
+<div class="page-break"></div>
+
+## 21. Deep study plate: timing envelope
+
+```mermaid
+gantt
+    title Healthy heartbeat cycle
+    dateFormat X
+    axisFormat %L
+    section Coordinator
+    Wait heartbeat period :0, 30
+    Send heartbeat        :30, 35
+    section Channel
+    Maximum delivery      :35, 55
+    section Follower
+    Safety margin         :55, 70
+```
+
+The watchdog must exceed heartbeat period plus worst configured delivery and
+reasonable scheduler margin. Derive this from constants used by the fixture.
+A test with zero delay cannot validate the production bound.
+
+False suspicion is excluded by the assignment's assumptions, but the
+implementation still needs constants consistent with that assumption. If
+healthy configured delays exceed the watchdog, the model violates itself.
+
+<div class="page-break"></div>
+
+## 22. Student workbook: heartbeat fault matrix
+
+```mermaid
+mindmap
+  root((Heartbeat tests))
+    Sender
+      expected coordinator
+      wrong replica
+      old coordinator
+    Timer
+      current version
+      stale version
+      cancelled but queued
+    Role
+      coordinator tick
+      follower watchdog
+      restart after sync
+    Output
+      heartbeat broadcast
+      one election request
+```
+
+For every leaf, define the initial role, ID, version, incoming sender, and
+expected callback/message count. Include negative assertions: no watchdog reset
+for wrong sender and no second election request for repeated stale expiries.

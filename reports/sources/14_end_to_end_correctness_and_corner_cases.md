@@ -297,3 +297,160 @@ Complete a trace for: client write, two ACKs in a five-replica system,
 coordinator crash, election, synchronization, then client read. Include one
 duplicate ACK and one stale watchdog. State exactly why each is ignored or
 accepted.
+
+<div class="page-break"></div>
+
+## 22. Deep study plate: construct a sequential history
+
+```mermaid
+flowchart LR
+    C1W[Client 1 write A] --> C1R[Client 1 read A]
+    C2R[Client 2 read old] --> C2W[Client 2 write B]
+    C1W -. choose compatible cross-client order .-> C2R
+    C2W --> Global[One total sequential explanation]
+    C1R --> Global
+```
+
+Sequential consistency requires a single order containing all operations while
+preserving each client's program order. It does not require that this order
+match wall-clock completion across different clients. To analyze a trace, draw
+per-client edges first, then add write-order edges from committed epoch pairs,
+then place reads after the writes whose values they return.
+
+If these edges form a cycle, no legal sequential history exists. This graph
+method is clearer than arguing from timestamps.
+
+<div class="page-break"></div>
+
+## 23. Deep study plate: end-to-end healthy write
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant F as Contact follower
+    participant K as Coordinator
+    participant Q as Quorum followers
+    C->>F: parent write
+    F->>K: child update request
+    K->>Q: UPDATE(pair,payload)
+    Q-->>K: distinct ACKs
+    K->>Q: WRITEOK(pair)
+    Q->>Q: apply once
+    K-->>F: child completion path
+    F-->>C: parent result
+```
+
+Every subsystem contributes: client order, parent-child correlation, channel
+FIFO, coordinator sequencing, quorum evidence, materialization, and callback.
+A local bug at any boundary can invalidate the global claim even when the other
+FSMs are correct.
+
+Use this trace as the baseline before injecting one perturbation. Changing one
+factor at a time makes failure reasoning teachable.
+
+<div class="page-break"></div>
+
+## 24. Deep study plate: crash after partial visibility
+
+```mermaid
+sequenceDiagram
+    participant K as Old coordinator
+    participant R1 as Replica with visible update
+    participant R2 as Replica with old value
+    participant E as Election/recovery
+    K->>R1: WRITEOK 7:4
+    R1->>R1: apply value
+    K--xR2: crash before delivery
+    R2->>E: heartbeat timeout
+    E->>R1: collect freshest evidence
+    R1->>R2: synchronize required update
+    R2->>R2: apply before new writes
+```
+
+This is the central uniform-agreement scenario. Numeric leader election alone
+is insufficient because the winner must carry or obtain 7:4. Snapshot-only
+recovery may converge current arrays but needs justification that it preserves
+identity, ordering, and pending evidence.
+
+Client timeout does not remove this obligation; visibility at R1 already made
+it a system safety issue.
+
+<div class="page-break"></div>
+
+## 25. Deep study plate: stale traffic after term change
+
+```mermaid
+flowchart TD
+    Old[Queued old-term event] --> Kind{kind}
+    Kind --> HB[heartbeat/watchdog]
+    Kind --> UP[UPDATE/ACK/WRITEOK]
+    Kind --> EL[election ACK/timeout]
+    HB --> Guards[role + coordinator + version]
+    UP --> Guards2[transaction + sender + epoch + state]
+    EL --> Guards3[election scope + attempt + completed set]
+    Guards --> Ignore[ignore if stale]
+    Guards2 --> Ignore
+    Guards3 --> Ignore
+```
+
+FIFO cannot solve these events because local timers and different senders are
+outside one channel order. Consumption-time validation is the common defense.
+Every message type needs an explicit stale policy; omission is a likely
+integration bug.
+
+Tests should deliver old events after synchronization rather than only checking
+that old timers were cancelled.
+
+<div class="page-break"></div>
+
+## 26. Deep study plate: safety and liveness dependency graph
+
+```mermaid
+flowchart TB
+    IDs[Correct identities] --> Dispatch[Correct dispatch]
+    Dispatch --> Quorum[Valid quorum decision]
+    Quorum --> Apply[Apply once]
+    Apply --> Safety[Sequential safety]
+    Heartbeat[Failure detection] --> Election[Election termination]
+    Election --> Recovery[Recovery barrier]
+    Recovery --> Safety
+    Recovery --> Liveness[Resume new operations]
+```
+
+Safety depends on both normal and recovery paths. Liveness depends on timers,
+surviving majority, ring progress, and barrier release. A timeout may stop one
+client request while the system-level recovery continues; describe these
+progress scopes separately.
+
+The current split branches provide mechanisms along the graph but are not one
+verified integrated proof. Keep that limitation prominent in the eventual exam
+report.
+
+<div class="page-break"></div>
+
+## 27. Student workbook: adversarial trace method
+
+```mermaid
+mindmap
+  root((Adversarial trace))
+    Identity
+      wrong ID
+      duplicate ID
+    Time
+      delayed result
+      stale timeout
+    Failure
+      coordinator crash
+      next-hop crash
+    Recovery
+      partial synchronization
+      second election
+    Observation
+      callback once
+      arrays and history converge
+```
+
+Choose one item from each branch and build a complete message table with actor,
+sender, transaction ID, epoch, FSM state, and visible array. At each row state
+why the event is accepted or rejected. End with one proposed sequential history
+and the evidence that every correct replica can eventually reach it.

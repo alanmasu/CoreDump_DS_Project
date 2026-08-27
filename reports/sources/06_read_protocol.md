@@ -182,3 +182,151 @@ state if the specification forbids reads from a stale replica.
 Add tests for invalid index, duplicate `ReadResultMsg`, result-after-timeout,
 and a read sent to a crashed target. For each, state whether the expected
 outcome is a callback, a timeout, or silent stale-message rejection.
+
+<div class="page-break"></div>
+
+## 16. Deep study plate: complete read path
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant C as Client read FSM
+    participant R as Selected replica
+    App->>C: read(index)
+    C->>C: create id and timeout
+    C->>R: ReadMsg(id,index)
+    R->>R: validate and inspect positions[index]
+    R-->>C: ReadResultMsg(id,value)
+    C->>C: cancel timer and finish once
+    C-->>App: callbackOnReadResult
+```
+
+The replica obtains the value at handling time. The client owns the timeout
+and externally visible callback. Keeping these responsibilities separate makes
+it clear why a replica cannot complete the next client request and why the
+client cannot safely index replica state directly.
+
+Record sender and target in a trace. A result with the correct ID but from a
+different replica should be evaluated against the protocol's sender policy,
+not accepted merely because the value type is correct.
+
+<div class="page-break"></div>
+
+## 17. Deep study plate: local-read meaning
+
+```mermaid
+flowchart TD
+    Read[Read request at R2] --> Local[Read R2.positions]
+    Local --> Old[Old value before WRITEOK]
+    Local --> New[New value after WRITEOK]
+    Local --> Recovery{R2 synchronizing?}
+    Recovery --> Policy[Serve or pause according to specification]
+```
+
+Local means no coordinator round trip. It does not mean the value is always
+globally latest. The consistency argument chooses a sequential point compatible
+with the value R2 currently exposes. If R2 is in recovery, the design must say
+whether its state can still be placed in a legal history or whether reads are
+paused until installation completes.
+
+Avoid calling local reads linearizable. Linearizability adds real-time order;
+the project targets sequential consistency, which preserves program order but
+can place overlapping operations differently.
+
+<div class="page-break"></div>
+
+## 18. Deep study plate: invalid index boundary
+
+```mermaid
+flowchart LR
+    Msg[ReadMsg index] --> Check{0 <= index < length?}
+    Check -->|yes| Access["positions[index]"]
+    Check -->|no| Defined[defined error or timeout policy]
+    Access --> Reply[ReadResultMsg]
+```
+
+Input validation belongs immediately before array access. In the inspected read
+branch, a direct indexing path can throw before a controlled protocol outcome.
+That exception is not an acceptable distributed reply: the client may only see
+silence and the actor may restart according to supervision rules outside the
+intended model.
+
+Tests should cover `-1`, exactly `length`, and a very large index. State the
+desired callback contract first; then modify or assess the handler. Validation
+helpers are useful only if every path calls them.
+
+<div class="page-break"></div>
+
+## 19. Deep study plate: terminal race
+
+```mermaid
+sequenceDiagram
+    participant M as Client mailbox
+    participant F as Read FSM
+    M->>F: ReadTimeoutMsg(id)
+    F->>F: enter TIMEOUT and callback
+    M->>F: late ReadResultMsg(id,value)
+    F->>F: reject terminal-state event
+```
+
+Reverse the order and success must win. Transaction removal may cause the
+dispatcher to drop the late event before the FSM sees it; either layer is safe
+if callback count remains one. The report should name which layer the real
+branch uses.
+
+Timeout payloads need the transaction ID because they share a dispatcher with
+network results. A bare “read timed out” event risks terminating whatever read
+happens to be active when it arrives.
+
+<div class="page-break"></div>
+
+## 20. Deep study plate: read consistency history
+
+```mermaid
+sequenceDiagram
+    participant C1 as Client 1
+    participant R1 as Replica 1
+    participant C2 as Client 2
+    participant R2 as Replica 2
+    C1->>R1: write x=5
+    R1-->>C1: write completes
+    C1->>R1: read x = 5
+    C2->>R2: overlapping read x = 0
+    Note over C1,R2: ask whether one sequential order explains both
+```
+
+To judge the history, include the write's replication/commit interval and both
+clients' program orders. C1's later read must follow its write. C2's read may
+be placed before the write if the operations overlap and the implementation's
+visibility rules permit it. If C2 reads 0 after observing another later write,
+the required order may become impossible.
+
+This reasoning is more precise than comparing wall-clock log lines, whose
+timestamps do not define a global serialization.
+
+<div class="page-break"></div>
+
+## 21. Student workbook: test matrix
+
+```mermaid
+mindmap
+  root((Read tests))
+    Valid
+      zero value
+      nonzero value
+      different target
+    Input
+      negative index
+      index equals length
+    Races
+      duplicate result
+      result after timeout
+      timeout after result
+    Failure
+      crashed target
+      read during recovery
+```
+
+For each leaf, specify initial positions, target actor, messages injected,
+expected callback, and forbidden second callback. Then state whether the test
+proves the local FSM, the client queue, or a cross-subsystem consistency claim.
