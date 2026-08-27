@@ -447,5 +447,92 @@ liveness claims.</li>
 contract. The class names can then be added as implementation evidence rather
 than memorized as substitutes for reasoning.</p>
 <div class="mermaid-image"><img src="mermaid/00_requirements_and_system_contract-06.png" alt="Rendered Mermaid diagram 6" /></div>
+<div class="page-break"></div>
+<h2>20. Lecture synthesis: turn prose requirements into proof obligations</h2>
+<p>An engineering requirement is useful only when we can say what observation
+would contradict it. Consider the sentence “all correct replicas eventually
+apply every delivered update.” The word <em>all</em> makes this an agreement claim;
+<em>eventually</em> makes it a liveness claim; <em>correct</em> limits the claim to replicas
+that do not crash; and <em>delivered update</em> identifies the event that creates the
+obligation. If one surviving replica applies an update and another surviving
+replica can remain forever without it, a counterexample exists. Reading the
+sentence this way turns natural language into something we can trace, test,
+and discuss precisely.</p>
+<p>This style of decomposition is especially important because the project mixes
+several levels of contract. Akka supplies actor isolation and a basic message
+transport model. The course infrastructure supplies API shapes, callbacks,
+crash controls, and network-delay helpers. The project protocol must supply
+quorum decisions, update ordering, failure handling, and recovery. None of
+these layers automatically proves the layer above it. A serialized mailbox
+protects a replica’s Java fields from simultaneous handlers, but it does not
+make two replicas agree. A reliable FIFO channel preserves one stream, but it
+does not choose a global order for streams from different senders. A majority
+ACK set proves that many replicas observed an update, but visibility still
+waits for the defined commit event.</p>
+<h3>20.1 Safety and liveness require different arguments</h3>
+<p>Safety says that no forbidden state is reachable. Typical safety questions
+are: can two payloads share one <code>EpochPair</code>; can an old-term <code>WRITEOK</code> overwrite
+newer state; can one client transaction emit both success and timeout; or can
+the same update be applied twice? A safety argument usually identifies an
+invariant and shows that every accepted event preserves it. One concrete
+invariant is “a committed pair has one immutable payload.” Constructors,
+message validation, history lookup, and duplicate handling are the mechanisms
+that must preserve that statement.</p>
+<p>Liveness says that some desirable event is eventually reached. Typical
+liveness questions are: does a healthy write complete; does a follower
+eventually suspect a silent coordinator; does an election token bypass a dead
+neighbor; and are writes released after synchronization? Liveness arguments
+need assumptions about time and failures. In this assignment those assumptions
+include bounded simulated delay, accurate timeout choices, static membership,
+and a surviving strict majority. If a proof silently assumes that every
+replica survives, it is proving a different system from the specified one.</p>
+<p>The distinction also explains why a client timeout is not a rollback. The
+client FSM can safely terminate because its waiting budget expired. Meanwhile,
+the replica protocol may already have crossed quorum and therefore be obliged
+to finish disseminating the update. The client-level liveness outcome and the
+system-level safety obligation coexist. Treating the timeout as permission to
+erase the update would confuse two scopes of state.</p>
+<h3>20.2 A worked requirement-to-code derivation</h3>
+<p>Take the uniform-agreement property and derive a review path. First identify
+the trigger: a replica applies an update on <code>WRITEOK</code>. Next identify durable
+evidence: the update pair, payload, and observed/committed history status.
+Then enumerate disruptive events: coordinator crash before quorum, after
+quorum, during <code>WRITEOK</code>, and during synchronization. Finally follow the
+evidence through election candidate selection and the recovery barrier. The
+property is not implemented by one method called <code>applyUpdate</code>; it is
+implemented by the fact that sufficient evidence survives every transition
+that might otherwise abandon the update.</p>
+<p>Now contrast a weak argument: “the coordinator broadcasts <code>WRITEOK</code>, so every
+replica applies.” This assumes the coordinator stays alive for the full loop
+and every destination processes the message. The assignment explicitly allows
+a crash during dissemination. A stronger argument says which survivors retain
+the update, why the election selects a sufficiently fresh candidate, how
+synchronization completes missing dissemination, and when new writes are
+allowed to begin. The counterexample improves the design because it locates
+the exact missing obligation.</p>
+<h3>20.3 Reading this repository without overclaiming</h3>
+<p>For each subsystem, keep a four-column notebook: <strong>claim</strong>, <strong>mechanism</strong>,
+<strong>evidence</strong>, and <strong>status</strong>. A claim is one sentence from the specification.
+The mechanism is an exact class, handler, field, and transition. Evidence is a
+focused test or a complete trace with negative assertions. Status records
+whether the behavior exists on this ref, another feature ref, or only in the
+specification. This method prevents code from one branch and a test from
+another branch being combined into an imaginary integrated implementation.</p>
+<p>When a mechanism is incomplete, weaken the conclusion rather than hiding the
+gap. “The heartbeat FSM rejects stale watchdog generations in its focused
+tests” is defensible. “Coordinator recovery is correct” requires heartbeat,
+election, history selection, synchronization, update resumption, and
+multi-failure tests to work together. Academic writing gains credibility from
+clear boundaries: a partial result can still teach an important design idea
+when it is labeled accurately.</p>
+<h3>20.4 Primary reading for the course model</h3>
+<p>The authoritative project contract is <code>specs/ds1_project_2026_v1.pdf</code>. For the
+runtime model, consult Akka’s official <a href="https://doc.akka.io/libraries/akka-core/current/general/actors.html"><em>What is an
+Actor?</em></a>
+and <a href="https://doc.akka.io/libraries/akka-core/current/general/message-delivery-reliability.html"><em>Message Delivery
+Reliability</em></a>
+chapters. Use those sources to check framework-level claims; use this
+repository’s source and tests to check project-level claims. The rest of these
+reports follows that separation.</p>
 </body>
 </html>

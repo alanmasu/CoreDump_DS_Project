@@ -378,3 +378,93 @@ duplicate WRITEOK, and one crashed follower. For every event, write the ACK set,
 FSM state, pair, and visible arrays. The exercise is complete only when you can
 explain why each ignored message is harmless and why the surviving majority
 still makes progress.
+
+<div class="page-break"></div>
+
+## 22. Lecture synthesis: a quorum is evidence, not replication by itself
+
+For `N` replicas, the assignment chooses `floor(N/2) + 1` acknowledgers. With
+five replicas the quorum size is three. Any two sets of three chosen from five
+must intersect, because two disjoint sets would require six distinct replicas.
+This intersection property is the mathematical reason a later majority cannot
+be completely ignorant of evidence held by an earlier majority.
+
+Intersection alone does not finish the protocol. ACKs must come from distinct,
+eligible replicas and refer to the same update pair and payload. The evidence
+must be retained and used by election/recovery. A counter that increments for
+duplicates may reach three with one sender. A set of valid sender IDs expresses
+the actual proof obligation directly.
+
+### 22.1 The two phases separate observation from commitment
+
+In the UPDATE phase, the coordinator assigns one `EpochPair`, broadcasts the
+payload, and gathers ACKs. Participants record observation but do not yet make
+the value visible. When the distinct ACK set reaches quorum, the coordinator
+crosses the decision point and broadcasts WRITEOK. A participant receiving a
+valid WRITEOK marks the record committed and materializes it once.
+
+This separation tolerates a follower crash because progress needs only a
+majority. It also creates recovery work: a coordinator can crash after some
+participants observed UPDATE or after some applied WRITEOK. History must tell
+the next coordinator which interrupted obligations exist. If the system simply
+starts a new epoch and forgets them, agreement can be violated.
+
+### 22.2 Reliable broadcast properties become concrete checks
+
+**Validity** asks whether an update from a correct coordinator eventually
+reaches delivery. In code, timeouts and healthy channel bounds are part of that
+liveness path. **Integrity** asks whether only sent updates are applied and at
+most once; pair/payload validation and committed-history lookup enforce it.
+**Uniform agreement** asks whether one application creates an obligation for
+all correct replicas; recovery after partial WRITEOK is essential. **Total
+order** asks whether all correct replicas apply multiple updates in the same
+relative order; epoch/sequence allocation and participant ordering guards carry
+that burden.
+
+Naming the four properties is not a proof. For each one, identify a message
+handler, state transition, retained record, and adversarial trace. If a
+property has no mechanism after coordinator failure, label it unimplemented
+rather than crediting the normal broadcast path.
+
+### 22.3 Why ACK is not yet visibility
+
+An ACK means “this participant received and accepted the proposal,” not “the
+system committed it.” Before quorum, the proposal may be known by only a
+minority. Applying it immediately can let a client read a value that the next
+surviving majority never learns. WRITEOK communicates that the coordinator has
+crossed the quorum threshold.
+
+Even WRITEOK must be validated. The transaction ID, update pair, payload
+association, expected coordinator, and participant state should agree. A late
+WRITEOK from an old epoch cannot be treated as a fresh command after
+synchronization. The history record turns it into either an idempotent repeat,
+a required recovery completion, or a contradiction to reject.
+
+### 22.4 Ordering concurrent client writes
+
+Two clients can contact different followers concurrently. Their arrival order
+at the coordinator is nondeterministic, but once the coordinator serially
+assigns `<e,i>` and `<e,i+1>`, every participant has the same logical order.
+The protocol need not reproduce wall-clock initiation order across independent
+clients. It must preserve the coordinator's assigned order and the per-client
+orders required by the consistency contract.
+
+This distinction is central to total-order broadcast. Agreement is about all
+correct replicas choosing the same order, not about discovering a metaphysical
+global “true time.” The epoch pair is the explicit decision that converts a
+concurrent arrival pattern into one shared sequence.
+
+### 22.5 Read the crash windows as increasing obligations
+
+Before any UPDATE is sent, recovery may only need to let the client time out or
+retry. After UPDATE reaches a minority, recovery must avoid contradictory reuse
+and decide how observed history is treated. After quorum, enough evidence
+exists that losing the update can break the intended protocol. After one
+replica applies, uniform agreement definitely requires eventual completion at
+all correct replicas.
+
+A good test campaign names these windows by listener callback or FSM state
+rather than sleeping for an approximate delay. After each injected crash,
+assert both survivor progress and forbidden outcomes: no conflicting payload
+for the pair, no duplicate materialization, and no new-term write before the
+required recovery barrier.

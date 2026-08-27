@@ -384,3 +384,106 @@ queued timer arrives after the state becomes `CRASHED`. For each test, state
 the expected absence of side effects as well as the expected message. A good
 answer names what must not change: position, history, active transaction count,
 or listener callback count.
+
+<div class="page-break"></div>
+
+## 21. Lecture synthesis: an actor is a boundary, not a thread wrapper
+
+The most productive way to learn Akka is to stop picturing an actor as an
+ordinary object that happens to run on another thread. An actor is a boundary
+around state, behavior, and an inbox. Code outside that boundary holds an
+`ActorRef`, which is an address-like capability for sending messages. It does
+not hold the actor instance and cannot call `Replica.setPosition` remotely.
+The runtime may execute different mailbox turns on different worker threads,
+but that scheduling detail is deliberately hidden from the protocol. The
+programmer's unit of reasoning is the mailbox turn: receive one message,
+inspect actor-owned state, make local changes, and send or schedule later
+messages.
+
+This model gives local atomicity, not distributed atomicity. During one
+`Replica` handler, another handler for the same replica will not interleave.
+Replica 2, however, may process an ACK while replica 1 is still handling an
+UPDATE. A send with `tell` also returns before the receiver handles the
+message. Therefore a line that sends `WRITEOK` does not mean that the update is
+already visible elsewhere. It means only that a new event has been introduced
+into the asynchronous system. Protocol state must represent everything that
+remains uncertain after that send.
+
+### 21.1 Why ordinary transaction objects are safe here
+
+`Transaction` subclasses are mutable FSM objects, yet they are not actors and
+do not own mailboxes. Their safety comes from confinement. A `Client` or
+`Replica` constructs the transaction, stores it in actor-owned state, and calls
+`start` or `computeState` only while processing its own mailbox. In effect, the
+actor is the concurrency boundary and the transaction is a modular piece of
+behavior inside that boundary. This is a useful composition technique: it
+avoids one huge receive method while preserving one serialized owner.
+
+Confinement would be broken if the same transaction object were stored in two
+actors or handed to a future that mutated it independently. Both actors could
+then enter `computeState` concurrently, and fields such as the FSM state, ACK
+set, or timeout handle would need conventional synchronization. The codebase
+instead sends immutable message data across boundaries and keeps the mutable
+conversation state at one owner.
+
+### 21.2 Receive order is part of the architecture
+
+The `createReceive` builder is a routing table evaluated for each dequeued
+message. Specific entry messages appear before a broad fallback because some
+events create a transaction rather than belong to an existing one. For
+example, the first election token may require `Replica.onElectionMsg` to
+construct election state. Only later messages with the same transaction ID can
+be delivered through the ordinary active-transaction lookup. If `matchAny`
+captures the token first, no FSM exists to receive it.
+
+There are thus two state machines in the receive path. The actor-level machine
+decides whether the replica is initialized, crashed, or allowed to create a
+conversation. The transaction-level machine decides whether a routed message
+is valid in `WAITING_ACK`, `WATCHING`, `SYNCHRONIZING`, or another protocol
+state. A transaction ID passing the first routing check does not bypass sender,
+epoch, generation, or state validation in the second machine.
+
+### 21.3 Initialization establishes shared context without shared state
+
+Two-phase initialization is a small example of distributed bootstrapping. The
+program must first create every actor to obtain stable `ActorRef`s. It can then
+send each replica an immutable membership map and initial coordinator. All
+replicas learn the same topology, but each stores its own copy of mutable
+protocol state. “Same information” is not the same as “same mutable object.”
+That distinction preserves actor encapsulation while giving every participant
+the addresses needed for broadcast and ring navigation.
+
+Startup also creates an ordering question. A message sent by the fixture after
+`InitSystem` from the same sender to the same replica follows that sender's
+order. Traffic arriving through another sender or intermediary does not gain
+that relationship automatically. A robust design either controls startup
+traffic or makes the uninitialized state explicit. This is the first place a
+student should practice writing assumptions next to a sequence diagram.
+
+### 21.4 Simulated crash versus Akka lifecycle failure
+
+The assignment's `Crash` message changes protocol behavior while keeping the
+actor and `ActorRef` alive. That is different from an actor throwing an
+exception, being restarted by supervision, or being stopped and sending later
+messages to dead letters. The simulated model is intentional: tests can choose
+a deterministic protocol point and then observe that the replica produces no
+more useful traffic. Every receive entry, timer, and send helper must respect
+the crash state for the illusion to be complete.
+
+When reviewing this boundary, ask three questions for every message type:
+Who owns the mutable fields it can change? Which actor-level guard runs before
+the FSM? What externally visible messages or callbacks can it produce? Those
+questions turn an Akka receive builder from framework syntax into an
+architectural map.
+
+### 21.5 Primary Akka reading
+
+The official Akka Classic chapters [*What is an
+Actor?*](https://doc.akka.io/libraries/akka-core/current/general/actors.html),
+[*Actor References, Paths and
+Addresses*](https://doc.akka.io/libraries/akka-core/current/general/addressing.html),
+and [*Classic
+Actors*](https://doc.akka.io/libraries/akka-core/current/actors.html) define the
+runtime concepts used here. The repository pins Akka 2.6.13, so examples in
+this report use the Classic Java API (`AbstractActor`, `Props`, `ActorRef`, and
+`Receive`) rather than silently switching to the newer typed API.

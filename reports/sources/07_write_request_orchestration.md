@@ -353,3 +353,90 @@ parent timeout. Include the mapping state in each postcondition. Then draw a
 trace in which the client times out but the child commits later; explain why
 the callback remains timeout and why replicated recovery must still preserve
 the update.
+
+<div class="page-break"></div>
+
+## 22. Lecture synthesis: orchestration connects API intent to replicated work
+
+A write begins as a client intention—set one array position to a value—but the
+contacted replica may not be the coordinator. The system therefore separates
+request orchestration from update agreement. The outer write FSM is responsible
+for reaching the right replica role and returning one client-facing outcome.
+The inner update FSM is responsible for assigning ordered identity, collecting
+a strict majority, and disseminating commit. Keeping those responsibilities
+separate makes each state machine smaller and exposes their failure boundary.
+
+The cost of separation is correlation. The client parent has an ID meaningful
+to the client actor. A replica-created child has an ID meaningful in the
+replica's active-transaction namespace. The contact replica must retain the
+relationship between them and translate child completion into a result that
+carries the parent ID. This is not bookkeeping incidental to the algorithm; it
+is the causal link that lets the API observe distributed completion.
+
+### 22.1 Contacting a follower is a relay, not a leadership transfer
+
+When a follower receives a write request, it does not become coordinator for
+that operation. It uses its current coordinator view to forward or initiate
+the coordinator-side work. The coordinator remains the authority that assigns
+the next `EpochPair`. If every contact replica allocated its own pair, two
+concurrent clients could create incomparable or conflicting update orders.
+
+The direct-coordinator case deserves its own trace. Sending through a network
+channel to self may create an unnecessary dependency or violate assumptions in
+the channel map. A coordinator can enter its local update path directly while
+preserving the same validation and callback semantics. Tests should cover both
+follower contact and coordinator contact because the routes differ even when
+the client-visible result is identical.
+
+### 22.2 Completion moves through layers
+
+Quorum does not directly call the client. The coordinator update reaches its
+commit rule, participants materialize according to WRITEOK, the child reports
+completion to its owner, the wrapper converts that event into a parent result,
+and the client emits the required callback. At each boundary, ask what the
+completion means. “Quorum reached” means sufficient ACK evidence exists;
+“wrapper completed” means the contact replica received its defined child
+outcome; “client success” means the public API is allowed to report success.
+
+Collapsing these meanings can produce premature callbacks. If success is sent
+when the request is merely forwarded, a later read may be scheduled before any
+commit. If the wrapper waits for every replica rather than the specified
+completion condition, one crashed follower can block liveness despite a
+surviving majority. The result boundary must match the protocol contract.
+
+### 22.3 Failure windows create asymmetric knowledge
+
+Suppose the client times out while the coordinator already has a quorum. The
+client knows only that no result arrived in time. The coordinator may know the
+update is committed. Some followers may know only that it was proposed. These
+different knowledge states are normal in a distributed execution. Recovery
+exists to reconcile replicas; the API timeout reports uncertainty to the
+caller.
+
+The wrapper should not attempt to “undo” replicated work after its parent
+times out. Nor should a late child result emit a second callback or complete a
+new parent that happens to be current. Closing the parent mapping makes the
+late message locally harmless while history and recovery preserve whatever
+system-level obligation remains.
+
+### 22.4 Orchestration tests need two levels
+
+A focused wrapper test can replace the child with an injected finish message
+and verify ID translation, timeout cancellation, queue release, and callback
+shape. This is good unit evidence because it isolates the outer FSM. It does
+not show that a real coordinator collected distinct ACKs, applied positions,
+or survived a crash window.
+
+An integration test should use several replicas, contact both a follower and
+the coordinator, verify the client callback, and inspect update-applied
+callbacks or subsequent reads across replicas. Then inject failure before and
+after quorum. The two test levels answer different questions and should not be
+substituted for each other in the report.
+
+### 22.5 A causal-chain debugging method
+
+When a write never completes, list the expected chain as parent ID, contact
+replica, child ID, coordinator, update pair, ACK set, WRITEOK recipients, child
+finish, parent result, callback. Mark the last observed link. Then check the
+guard at the next boundary. This method narrows the fault without adding broad
+logging or assuming the most complicated subsystem is responsible.

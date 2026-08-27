@@ -368,3 +368,91 @@ every event. Add foreign-result, duplicate-result, result-after-timeout, and
 timeout-after-result tests. Explain why silence from the wrong ID is correct
 behavior, while silence from the matching healthy request may be a liveness
 failure.
+
+<div class="page-break"></div>
+
+## 22. Lecture synthesis: an asynchronous API is a protocol boundary
+
+From the caller's perspective, `sendRead` and `sendWrite` look like method
+calls. Their results do not return on the Java stack. The methods construct a
+transaction, enqueue or start it, send messages, and return immediately. The
+observable outcome arrives later through a listener callback. The client actor
+therefore translates a synchronous-looking command into an asynchronous
+conversation with explicit correlation and a terminal policy.
+
+This is why callbacks belong to the API contract rather than optional logging.
+A successful read callback identifies the target, index, and value. A timeout
+callback identifies the request that stopped waiting. Tests use those outputs
+as the public behavior of the actor. Updating a private field without emitting
+the required callback is not a completed client operation.
+
+### 22.1 Serialization provides session order
+
+The client permits one `currentTransaction` and keeps later operations in a
+FIFO queue. Suppose one client invokes write W and then read R. R does not
+start merely because both Java methods have been called; it starts when W
+reaches its terminal path and `onTransactionComplete` polls the queue. This
+creates a clear per-client session order and simplifies result routing because
+only one client FSM can accept a message at a time.
+
+The trade-off is head-of-line blocking. A slow write delays an independent
+later read from that client, even if the read targets another replica. For this
+assignment, preserving simple client order is more valuable than maximizing
+one client's concurrency. A production API might allow multiple active
+operations, but then it would need a map keyed by transaction ID and a more
+explicit consistency contract.
+
+### 22.2 Exactly one terminal callback is a local invariant
+
+Success and timeout are competing terminal events. After success, a queued
+timeout may still arrive; after timeout, a delayed result may still arrive.
+The client must emit exactly one public outcome, clear the matching current
+transaction once, and start at most one successor. ID matching and terminal
+state make the losing event harmless.
+
+Notice the scope of this invariant. It means the client reports one outcome
+for one waiting transaction. It does not mean the distributed operation had
+exactly one effect. A timed-out write may later commit, and a manual retry may
+create a second update. Exactly-once effects would require a stable logical
+operation key and deduplication retained by the replicated system, not only a
+client-side transaction counter.
+
+### 22.3 Timeout communicates uncertainty honestly
+
+A timeout means “the expected result was not observed before this deadline.”
+It does not prove that the request never reached the target, that the target
+did no work, or that a quorum did not commit. This is an important API design
+lesson: failure to observe success is not observation of failure. The callback
+should let the application distinguish a negative result from an unknown
+outcome.
+
+For reads, retrying after timeout usually creates a fresh observation. For
+writes, retry policy is more delicate. Repeating `set index 2 to 7` may look
+safe because assignment is naturally idempotent at the array level, but it can
+still allocate a second `EpochPair`, emit extra callbacks, and change history.
+The client API should not promise transparent retry semantics that the server
+protocol does not implement.
+
+### 22.4 Target choice affects availability, not ordering by itself
+
+A default replica makes the simple API convenient, while an explicit target
+supports tests and routing choices. Contacting a follower is legal: the
+follower can serve a local read or forward a write toward the coordinator.
+Target selection does not itself provide consistency. The queue provides
+client order, the read policy determines what local state may be observed, and
+the update protocol determines when a write becomes visible.
+
+Failure handling should also be explicit. A missing default target is a local
+input/configuration error and should not masquerade as a network timeout. An
+out-of-range index is an invalid request boundary. A valid request to a crashed
+replica is a distributed availability case. Keeping these categories separate
+makes callbacks and tests more informative.
+
+### 22.5 Read the client as a five-variable machine
+
+To understand any trace, record the next transaction counter, current ID,
+queued IDs, current timer, and callbacks already emitted. Then process one
+mailbox event at a time. This ledger is enough to explain scheduling and
+at-most-one completion without inspecting every Java statement. It also makes
+bugs obvious: a queue item disappears, an old ID completes the new request, or
+a callback count becomes two.

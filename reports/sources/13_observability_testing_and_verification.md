@@ -424,3 +424,87 @@ Create one row for every major claim in the other fourteen reports. If a row
 lacks a mechanism, weaken the claim. If it lacks a test, label it reasoned or
 pending. If the code exists only on a feature branch, preserve that provenance
 instead of presenting an integrated pass.
+
+<div class="page-break"></div>
+
+## 26. Lecture synthesis: evidence must match the claim
+
+A distributed execution contains important facts that private field inspection
+or a final return value cannot reveal. Which replica acknowledged? Which pair
+was applied? Did election start once or twice? Did a crashed node remain
+silent? The listener callbacks and structured logs expose these protocol events
+to TestKit probes. Observability is therefore part of testability: it creates a
+controlled surface on which correctness claims can be evaluated.
+
+Instrumentation must be passive. A callback may report that an update was
+applied, but it must not trigger the application or supply data that the real
+protocol lacks. The production transition should happen first, followed by an
+observation message. This ordering lets tests use callbacks as witnesses
+without turning the test harness into another protocol participant.
+
+### 26.1 Read a test as claim, setup, stimulus, oracle
+
+Start from the assertion rather than the fixture. The assertion is the
+test's actual claim. Work backward to the observation that satisfies it, the
+stimulus that should cause that observation, and the initial state that makes
+the stimulus meaningful. Then list forbidden observations. This method often
+reveals that a test named “write succeeds” asserts only a client callback and
+never checks replicated state.
+
+An **oracle** is the rule that decides correctness. One callback can be an
+oracle for API completion. A map of update-applied callbacks can be an oracle
+for convergence. A proposed sequential history can be an oracle for read/write
+consistency. Choose the oracle at the same abstraction level as the claim.
+
+### 26.2 Determinism comes from controlling events
+
+Sleeping and hoping a race occurs produces weak evidence. TestKit can inject a
+specific message, wait for a named callback, and assert silence for a bounded
+period. The crash controller can stop a replica at a counted protocol event.
+Generation fields let tests construct a stale timeout deliberately. These
+techniques turn concurrency bugs into reproducible state-machine cases.
+
+Some nondeterminism remains valuable. Random channel delays explore legal
+interleavings. Use fixed or recorded seeds when a failure must be reproduced,
+and pair randomized campaigns with deterministic regression tests for every
+discovered bug. A stable test suite is not one that avoids concurrency; it is
+one that controls and explains it.
+
+### 26.3 Positive and negative assertions form one proof
+
+For a timeout race, assert that one terminal callback occurs and that the other
+does not. For a stale watchdog, assert no election start, then inject the
+current watchdog and assert one start. For a crash, assert the crash point was
+reached, the target produces no forbidden output, and survivors progress.
+Positive assertions show a path exists; negative assertions protect safety
+boundaries around it.
+
+Absence checks must use a justified observation window. Too short can miss a
+delayed violation; too long hides the relationship between the protocol bound
+and the test. Derive the window from configured maximum latency, heartbeat or
+ACK timeout, and the number of expected hops.
+
+### 26.4 Coverage and static analysis answer narrower questions
+
+Line coverage says which bytecode executed, not whether the right invariant
+held. One happy path can cover most of an FSM while missing wrong sender,
+duplicate ACK, stale timeout, and old epoch behavior. Use coverage to find
+unvisited code, then design semantic assertions from the state/message matrix.
+
+PMD, SpotBugs, CPD, and formatting checks find maintainability and bug patterns;
+they do not prove a distributed algorithm. Likewise, a Gradle task configured
+with `ignoreFailures` can finish while reports contain findings. Verification
+should record both task exit and substantive findings. Tool output is one rung
+in the evidence ladder, below focused protocol and integration behavior.
+
+### 26.5 Build a traceable verification matrix
+
+For each requirement, name the enforcing transition, focused test, integration
+test, and remaining gap. Include the exact Git ref because this repository
+keeps important subsystems on different branches. A green test from one head
+cannot validate code introduced later or code present only elsewhere.
+
+The strongest final evidence combines compilation, focused FSM tests,
+cross-replica tests, adversarial crash traces, callback-count assertions,
+state/history convergence, static-analysis review, and rendered documentation
+inspection. No single number replaces that portfolio.

@@ -399,5 +399,78 @@ once, and no newer-term write before required old-term recovery completes.</p>
 <p>Finally, compare that design with the inspected branch. Mark implemented
 fields, nullable fields, and missing transitions. This comparison is more
 educational than presenting ideal pseudocode as if it were current behavior.</p>
+<div class="page-break"></div>
+<h2>23. Lecture synthesis: replicated state needs an explanation of its past</h2>
+<p>The integer array is the application’s visible state, but it is not enough to
+run the protocol safely. If position 3 currently contains 9, that value alone
+does not reveal which update installed it, whether a quorum acknowledged that
+update, whether another update was observed but not committed, or which
+coordinator term produced it. Recovery needs those distinctions. This is why a
+distributed replica stores both materialized state and protocol metadata.</p>
+<p>Think of materialization as folding an ordered history into an array. Starting
+from the initial array, apply each committed update in <code>EpochPair</code> order. The
+result is the current snapshot. Two histories can fold to the same snapshot:
+<code>x=4, x=9</code> and just <code>x=9</code> both finish with 9. They are not equivalent evidence
+if the first update was acknowledged by a quorum or if another replica still
+waits for its completion. A snapshot answers “what value would a local read
+return?” A history answers “how did the system acquire the obligations it must
+preserve?”</p>
+<h3>23.1 Epoch pairs create a logical order</h3>
+<p>An <code>EpochPair(e, i)</code> is compared lexicographically. Epoch is the coordinator
+term; sequence is the position assigned within that term. Thus <code>&lt;4,9&gt;</code> is
+older than <code>&lt;5,0&gt;</code> even though 9 is numerically greater than 0. Resetting the
+sequence after election is safe only because the epoch increases. This is a
+logical clock: it captures protocol order without pretending to be physical
+time.</p>
+<p>Uniqueness needs more than a <code>compareTo</code> method. One coordinator must be the
+only allocator for an epoch, it must not reuse a sequence for a different
+payload, and a new coordinator must choose a strictly newer epoch. Participants
+must reject a pair that conflicts with retained history. The Java value object
+makes comparison deterministic; the election and update protocols create the
+conditions under which those values have trustworthy meaning.</p>
+<h3>23.2 Observed and committed are different knowledge states</h3>
+<p>Receiving UPDATE lets a replica record that the coordinator proposed a pair
+and payload. It does not yet authorize visibility. Receiving valid WRITEOK
+means the coordinator obtained the required quorum and the replica can
+materialize the update. A useful history model therefore has a monotonic state
+transition from absent, to observed, to committed. It never moves backward.</p>
+<p>This distinction protects reads and supports recovery. Applying at observation
+time risks exposing a proposal that no quorum ever supported. Recording
+nothing until WRITEOK risks losing the freshest evidence when the coordinator
+crashes after some UPDATE deliveries. The observed record occupies the middle:
+not yet visible, but available to an election or recovery procedure that must
+decide whether interrupted work needs completion.</p>
+<h3>23.3 Idempotence is an identity property</h3>
+<p>Network or recovery logic can present the same WRITEOK more than once. A
+participant should look up the pair, verify the payload, and detect that the
+commit transition already occurred. It must not apply again or emit another
+“update applied” callback. Assignment writes happen to overwrite an integer,
+so repeating the same assignment may leave the same array. That accidental
+state equality does not make the protocol idempotent: duplicate callbacks,
+history entries, or sequence movement remain observable effects.</p>
+<p>An equally important case is one pair with two different payloads. The second
+message is not a duplicate; it is a protocol contradiction. Silently applying
+it would allow the same logical log position to mean different things at
+different replicas. The correct response is to reject and surface the
+inconsistency, not to let “last arrival wins” rewrite history.</p>
+<h3>23.4 Snapshot installation needs a boundary policy</h3>
+<p>Synchronization that copies only <code>positions</code> can make immediate reads agree,
+but it leaves open how future duplicate UPDATE or WRITEOK messages are judged.
+Copying history without validating order can import contradictions. A complete
+installation policy defines the accepted sender and epoch, validates snapshot
+shape, installs or merges ordered records, cleans old FSMs, updates the
+coordinator view, and only then releases new writes.</p>
+<p>Immutability matters at this boundary. If a synchronization message shares a
+mutable array or list with the winner, a follower could observe later changes
+without processing a message. Defensive copies restore the actor model: the
+message is a value describing one snapshot, and each receiver independently
+installs actor-owned state.</p>
+<h3>23.5 How to audit the state layer</h3>
+<p>Choose one index and trace five columns after every event: visible value,
+current epoch, next sequence, observed records, and committed records. Inject
+duplicate and conflicting messages, then an election. A correct explanation
+must show which column changes and why. This small ledger makes hidden metadata
+visible and reveals whether recovery is preserving history or merely copying
+the latest array.</p>
 </body>
 </html>

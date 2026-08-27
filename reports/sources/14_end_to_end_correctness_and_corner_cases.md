@@ -454,3 +454,94 @@ Choose one item from each branch and build a complete message table with actor,
 sender, transaction ID, epoch, FSM state, and visible array. At each row state
 why the event is accepted or rejected. End with one proposed sequential history
 and the evidence that every correct replica can eventually reach it.
+
+<div class="page-break"></div>
+
+## 28. Lecture synthesis: correctness is a composition argument
+
+No class in this project can prove the whole system correct. Client queuing
+contributes session order. Channel actors contribute scoped FIFO delivery.
+Update FSMs contribute quorum evidence and commit dissemination. History
+contributes recovery knowledge. Heartbeat contributes failure suspicion.
+Election chooses a fresh survivor. Synchronization creates a new-term barrier.
+End-to-end reasoning connects these local claims without silently strengthening
+any of them.
+
+A composition argument starts with invariants at subsystem boundaries. A
+client result refers to exactly one parent transaction. A committed
+`EpochPair` refers to one payload. Positions contain only committed updates.
+Every applied update remains recoverable by a surviving election candidate.
+New-term writes wait until synchronization. Each subsystem may assume the
+previous invariant and must establish the next.
+
+### 28.1 Construct histories, do not rely on timestamps
+
+To check sequential consistency, list each client's program order and each
+replica observation. Propose one total sequence of operations that preserves
+the required local orders. Replay writes in that sequence and verify every
+read returns the value of the latest preceding write to its index. If no such
+sequence exists, the execution is a counterexample.
+
+Log timestamps help diagnose delays but do not choose the legal history. Two
+actors have concurrent mailbox turns, and the simulator does not provide a
+globally authoritative commit clock. `EpochPair` orders updates; client queues
+order one client's requests; message causality provides other edges. Build the
+history from those protocol facts.
+
+### 28.2 Safety survives by preserving evidence
+
+Consider a coordinator crash after R1 applied update U while R2 and R3 only
+observed it. The immediate arrays disagree. That temporary state is not by
+itself the final violation; the key question is whether every correct replica
+eventually applies U. Election must select a candidate carrying sufficient
+evidence, and synchronization must finish U before conflicting new work.
+
+Now remove U from all election records. The new coordinator can safely run an
+election algorithm in the narrow sense yet start from an unsafe history. This
+counterexample shows why the proof edge from update history to candidate
+freshness is essential. Testing each subsystem only in isolation would miss
+the broken composition.
+
+### 28.3 Liveness has several scopes
+
+Client liveness asks whether one caller receives a result or timeout. Update
+liveness asks whether a healthy quorum reaches commit. Election liveness asks
+whether a winner is eventually selected despite failed ring neighbors.
+Recovery liveness asks whether the barrier completes and releases new writes.
+One scope can terminate while another continues: a client may time out even as
+recovery later completes its update.
+
+State assumptions next to every liveness claim. Bounded delays justify timer
+progress. A surviving strict majority justifies quorum and fresh-candidate
+availability. Static membership makes ring traversal finite. If the winner can
+crash during recovery, another election must preserve installed evidence.
+Without these assumptions, “eventually” has no engineering basis.
+
+### 28.4 A systematic corner-case generator
+
+Choose one item from each axis: protocol phase, actor role, message anomaly,
+and failure moment. For example: WRITEOK phase + follower + duplicate message
++ coordinator crash. Derive the expected invariant, then write the trace. This
+method generates meaningful cases without relying on intuition to remember
+every interleaving.
+
+For each event record receiver state, envelope sender, payload sender,
+transaction ID, epoch pair, timer generation, ACK/candidate set, visible value,
+and emitted callback. Decide acceptance before looking at the implementation.
+Then compare the code's guards with the expected transition. Disagreements
+become focused review findings or tests.
+
+### 28.5 How to make a defensible final claim
+
+Use calibrated language. “The focused election tests cover dead-neighbor
+skipping and stale ACK timeouts at commit X” is evidence-backed. “The system
+tolerates arbitrary failures” is not, because the model excludes loss of a
+majority, partitions, Byzantine behavior, and recovery of crashed replicas.
+Similarly, branch-local success should not be presented as integrated success.
+
+A defensible end-to-end demonstration begins with one healthy multi-client
+trace, then injects crashes before quorum, after quorum, during WRITEOK, during
+election, and during synchronization. It verifies callback counts, applied
+order, retained history, coordinator convergence, and successful post-recovery
+work. The report should state which of these runs on one integrated head and
+which remain design obligations across feature branches.

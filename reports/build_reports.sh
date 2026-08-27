@@ -38,6 +38,8 @@ done
 
 expected=$(find "$source_dir" -maxdepth 1 -name '*.md' | wc -l)
 actual=$(find "$report_dir" -maxdepth 1 -name '*.pdf' | wc -l)
+minimum_pdf_words=2300
+minimum_pdf_pages=10
 
 if [[ "$expected" -ne "$actual" ]]; then
     printf 'Expected %s PDFs but found %s\n' "$expected" "$actual" >&2
@@ -47,12 +49,12 @@ fi
 for pdf in "$report_dir"/*.pdf; do
     qpdf --check "$pdf" >/dev/null
     pdfinfo "$pdf" >/dev/null
-    if [[ $(pdftotext "$pdf" - | wc -w) -lt 300 ]]; then
-        printf 'PDF appears unexpectedly short: %s\n' "$pdf" >&2
+    if [[ $(pdftotext "$pdf" - | wc -w) -lt "$minimum_pdf_words" ]]; then
+        printf 'PDF has fewer than %s extractable words: %s\n' "$minimum_pdf_words" "$pdf" >&2
         exit 1
     fi
-    if [[ $(pdfinfo "$pdf" | awk '/^Pages:/ {print $2}') -lt 10 ]]; then
-        printf 'PDF has fewer than 10 pages: %s\n' "$pdf" >&2
+    if [[ $(pdfinfo "$pdf" | awk '/^Pages:/ {print $2}') -lt "$minimum_pdf_pages" ]]; then
+        printf 'PDF has fewer than %s pages: %s\n' "$minimum_pdf_pages" "$pdf" >&2
         exit 1
     fi
 done

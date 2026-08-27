@@ -4,12 +4,15 @@ This directory contains long-form study reports for the CoreDump distributed-sys
 
 The final exam report is intentionally **not** included.
 
-This is the expanded deep study edition. Every subsystem report is at least ten
-A4 pages and combines a codebase map with beginner explanations,
-“code-microscope” walkthroughs, concrete failure or timing examples, six
-rendered Mermaid study diagrams, and practice questions. The wording is
-intentionally instructional so a student can read one report without already
-knowing Akka or distributed-systems terminology.
+This is the expanded lecture-note edition. Every subsystem report combines a
+codebase map with beginner explanations, “code-microscope” walkthroughs,
+concrete failure or timing examples, six rendered Mermaid study diagrams,
+practice questions, and a prose-heavy lecture synthesis. The synthesis sections
+connect the implementation to transferable concepts such as actor isolation,
+partial orders, finite-state machines, quorum intersection, failure detectors,
+logical clocks, and safety/liveness proofs. The wording is intentionally
+instructional so a student can read one report without already knowing Akka or
+distributed-systems terminology.
 
 ## Reading order
 
@@ -31,11 +34,13 @@ knowing Akka or distributed-systems terminology.
 
 Editable Markdown lives in `sources/`. Run `./reports/build_reports.sh` from anywhere in the repository to regenerate the PDFs. The build renders Mermaid fences with `mmdc`, parses Markdown with `cmark`, and lays out PDFs with the local `render_reports.py` ReportLab renderer. Generated HTML and Mermaid PNGs are kept in `reports/generated/` so rendering problems can be inspected without editing the PDFs.
 
-The current deep edition is 15 PDFs, at least 10 pages per report, and 90
-rendered Mermaid diagrams. The build fails if any PDF falls below the page
-minimum. PDF validation checks page metadata and extractable text;
-representative pages are also rendered to images to check diagrams, callouts,
-tables, and code blocks.
+The current edition is 15 PDFs, at least 10 pages per report, and 90 rendered
+Mermaid diagrams. Body text uses a justified lecture-note layout with a clear
+section hierarchy and chapter-specific running footers. The build fails if any
+PDF falls below 10 pages or 2,300 extractable words. PDF validation checks page
+metadata and extractable text; representative pages should also be rendered to
+images after substantial style changes to check diagrams, callouts, tables,
+and code blocks.
 
 ## Provenance rule
 

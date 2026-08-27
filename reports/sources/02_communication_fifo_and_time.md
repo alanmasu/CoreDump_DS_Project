@@ -374,3 +374,98 @@ occur first because the destination changed.
 Finish by designing three tests: FIFO under contrasting random delays, sender
 preservation, and stale local timer rejection. Explain what each test proves
 and what it does not prove about total-order broadcast.
+
+<div class="page-break"></div>
+
+## 24. Lecture synthesis: reason with partial orders, not one global clock
+
+An asynchronous execution is better understood as a set of ordering
+constraints than as one perfect timeline. If actor A sends `m1` and then `m2`
+directly to actor B, the sender-receiver rule constrains B to enqueue them in
+that order when both are delivered. If actor C also sends `x` to B, the model
+does not decide whether `x` appears before, between, or after A's messages.
+These constraints form a **partial order**: some pairs are ordered and others
+are concurrent. A protocol creates stronger order only by exchanging more
+information, such as sequence numbers, acknowledgements, or commit messages.
+
+The project's `NetworkChannel` makes this model visible. One channel actor owns
+a queue for a fixed source-destination stream. It schedules delivery for the
+head, delivers that item, and only then schedules the next head. Random delay
+therefore changes when the stream advances without allowing its second item to
+overtake the first. Separate channel actors schedule independently, which is
+why their streams may interleave at the destination.
+
+### 24.1 The sender has two meanings
+
+Akka associates every envelope with an immediate sender. The channel is an
+intermediary, but `NetworkChannel` saves the original sender and passes it to
+`destination.tell`. This matters because protocol handlers use sender identity
+for ACK validation, coordinator validation, and replies. If the channel sent
+with itself as sender, a follower could acknowledge the channel rather than
+the coordinator, and an election FSM could not identify the ring neighbor that
+responded.
+
+The project also stores a `sender` inside `Msg`. That field is protocol data,
+while Akka's envelope sender is delivery metadata. Keeping them consistent is
+an invariant worth testing. A malicious or malformed message could claim one
+sender in its payload while arriving from another envelope sender. Even in a
+course simulation, code should be clear about which identity is authoritative
+for each decision.
+
+### 24.2 FIFO is deliberately weaker than total order
+
+Suppose R0 sends update `u` to R2 while R1 sends update `v` to R2. FIFO says
+nothing about the relative order of `u` and `v`, because they came from
+different senders. Worse, R3 may observe the opposite interleaving. Total-order
+broadcast therefore cannot be obtained by saying “Akka mailboxes are FIFO.”
+The coordinator must assign comparable `EpochPair`s, and participants must
+validate and materialize updates according to that shared order.
+
+This is a reusable distributed-systems lesson: transport order is scoped to a
+channel; protocol order is scoped to a logical operation or log. Whenever a
+review claims “message A must arrive first,” write the sender, destination, and
+path for both messages. If any of those differ, demand another causal link.
+
+### 24.3 Timers add events; they do not interrupt actors
+
+`scheduleToItself` asks the Akka scheduler to enqueue a message in the future.
+The scheduler does not pause a handler at exactly the deadline and jump into
+timeout code. The timeout waits behind anything already in the mailbox and is
+handled as an ordinary later turn. Conversely, a result and a timeout may both
+become queued close together. Whichever terminal event the FSM accepts first
+must make the other harmless.
+
+This explains the generation pattern. Calling `Cancellable.cancel()` is a
+resource optimization, but cancellation cannot undo a task that has already
+started or a message already enqueued. A timeout carries the generation for
+the attempt that created it. The handler compares that value with current
+state before producing a side effect. Correctness is decided at consumption
+time, using the actor's current knowledge.
+
+### 24.4 Deriving a timeout rather than guessing one
+
+For a one-way heartbeat, a follower watchdog must exceed the largest healthy
+gap between observed heartbeats. That gap includes the coordinator's send
+period, the maximum configured channel delay, scheduler granularity, mailbox
+backlog, and a deliberate margin. For a request-response exchange, include
+both outward and return delay plus the remote processing interval. For a
+multi-round protocol, count the longest legal critical path rather than one
+message hop.
+
+Timeout design therefore couples liveness and accuracy. A very short timeout
+reacts quickly but may suspect healthy actors; a very long timeout preserves
+accuracy but delays recovery. The specification assumes accurate detection,
+so configured bounds must make false suspicion impossible in the simulated
+environment. Tests should run near the bound, not only with zero latency.
+
+### 24.5 Primary Akka reading
+
+Akka's official [*Message Delivery
+Reliability*](https://doc.akka.io/libraries/akka-core/current/general/message-delivery-reliability.html)
+chapter defines at-most-once delivery and per-sender/receiver ordering,
+including the fact that ordering is not transitive through an intermediary.
+The official [*Classic
+Scheduler*](https://doc.akka.io/libraries/akka-core/current/scheduler.html)
+chapter explains scheduler precision and the limit of cancellation. Read those
+guarantees beside `NetworkChannel.java`: the framework defines the base model,
+while the channel actor adds the assignment's controlled FIFO delay.

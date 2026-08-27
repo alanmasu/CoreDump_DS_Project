@@ -410,5 +410,74 @@ acknowledgements are useful test evidence.</p>
 requirement. Then build a trace beginning with partial WRITEOK, followed by two
 coordinator failures. The trace is safe only if required update knowledge
 survives both transitions.</p>
+<div class="page-break"></div>
+<h2>23. Lecture synthesis: recovery is a barrier between two terms</h2>
+<p>Election answers who should coordinate next. Recovery answers what that winner
+is allowed to believe and when it may begin new work. Without recovery, a new
+coordinator can be elected successfully and still violate safety by forgetting
+an update that some correct replica applied. The synchronization phase is
+therefore not optional cleanup; it is the protocol boundary between the failed
+term and the new term.</p>
+<p>A useful mental model is a barrier. Before the barrier, replicas may have
+different knowledge from the interrupted epoch. During the barrier, the winner
+collects or chooses authoritative evidence and distributes the state required
+for convergence. After the barrier, all required correct participants satisfy
+the new-term invariants and writes may resume. New <code>EpochPair</code>s must not race
+ahead of that installation.</p>
+<h3>23.1 Recover obligations, not merely values</h3>
+<p>Suppose R1 applied <code>&lt;4,7&gt;</code> before the old coordinator crashed, while R2 only
+observed it and R3 never saw it. Copying an older majority snapshot that lacks
+the update could make current arrays agree by deleting R1’s visible fact, but
+uniform agreement says the correct replicas must eventually apply what a
+replica already applied. Recovery must recognize the retained pair/payload and
+complete its obligation.</p>
+<p>This example shows why candidate freshness and history matter. The winner
+should carry evidence sufficient to distinguish committed, observed, and
+absent updates. If the inspected implementation sends only a snapshot, the
+report must state which recovery cases that snapshot covers and which history-
+replay guarantee remains incomplete.</p>
+<h3>23.2 A synchronization message crosses a trust boundary</h3>
+<p>The receiver should validate that the sender is the election result it accepts,
+the announced epoch is strictly newer than its current term, the snapshot has
+the required fixed length, and history entries are ordered and internally
+consistent. A stale or malformed synchronization message should have no
+partial side effect. Validate first, then install as one actor-owned transition.</p>
+<p>Defensive copying prevents the winner and follower from sharing mutable arrays
+or collections inside one JVM. This preserves the semantic rule that state
+changes only when the receiving actor processes a message. Serialization would
+copy data across real processes, but local tests should not depend on that
+accident of deployment.</p>
+<h3>23.3 Choosing the new epoch</h3>
+<p>The new epoch must be greater than every epoch that survivors may legitimately
+retain. Incrementing only the winner’s local epoch is unsafe if another
+candidate knows a higher interrupted term. Candidate collection should expose
+the maximum relevant epoch; the winner chooses a value above it and resets the
+within-epoch sequence according to the specification.</p>
+<p>This is the fencing role of epochs. Once a follower installs term 6, delayed
+term-5 traffic cannot authorize new state changes. Transaction ID equality is
+not enough because an old conversation can still have a valid local ID. Epoch
+validation separates leadership generations.</p>
+<h3>23.4 Define completion as observable acknowledgements</h3>
+<p>Broadcasting <code>SynchronizationMsg</code> is not the same as completing
+synchronization. Messages are asynchronous, and the winner can crash halfway
+through dissemination. A barrier needs a completion rule—often ACKs from a
+strict majority or the required set of correct participants, depending on the
+design—and it must count distinct validated senders.</p>
+<p>Only after that rule should the winner accept new writes and start coordinator
+heartbeat behavior. Followers should update their coordinator view and restart
+watchdogs as part of the same installed transition. Tests can observe this
+through synchronization callbacks, coordinator callbacks, heartbeat traffic,
+and successful post-recovery operations.</p>
+<h3>23.5 Recovery must itself tolerate interruption</h3>
+<p>If the new winner crashes after synchronizing only R1, a second election begins
+from a mixed state. R1 may now hold the freshest installed evidence. Candidate
+selection must preserve it, while participants must avoid treating an
+incomplete term as permission for conflicting writes. This two-failure trace
+is one of the strongest tests of the design because it checks that recovery
+does not rely on its own leader being immortal.</p>
+<p>For a review, trace current epoch, accepted coordinator, visible snapshot,
+observed/committed history, synchronization status, and write-admission flag at
+every replica. The barrier is correct only if no forbidden new write slips
+through and required evidence survives another election.</p>
 </body>
 </html>

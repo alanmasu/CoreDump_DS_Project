@@ -16,7 +16,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
@@ -91,7 +91,8 @@ def inline_markup(node: Node | str) -> str:
     if node.tag == "br":
         return "<br/>"
     if node.tag == "a":
-        return inner
+        href = html.escape(node.attrs.get("href", ""), quote=True)
+        return f'<a href="{href}" color="#1f6f8b"><u>{inner}</u></a>' if href else inner
     return inner
 
 
@@ -126,10 +127,10 @@ class ReportRenderer:
         self.base_dir = Path.cwd()
         base = getSampleStyleSheet()
         self.styles = {
-            "h1": ParagraphStyle("ReportH1", parent=base["Title"], fontName="Helvetica-Bold", fontSize=22, leading=25, textColor=colors.HexColor("#173f5f"), spaceAfter=10, keepWithNext=True),
-            "h2": ParagraphStyle("ReportH2", parent=base["Heading2"], fontName="Helvetica-Bold", fontSize=14, leading=17, textColor=colors.HexColor("#173f5f"), spaceBefore=12, spaceAfter=5, keepWithNext=True),
-            "h3": ParagraphStyle("ReportH3", parent=base["Heading3"], fontName="Helvetica-Bold", fontSize=11, leading=14, textColor=colors.HexColor("#285d75"), spaceBefore=9, spaceAfter=3, keepWithNext=True),
-            "body": ParagraphStyle("ReportBody", parent=base["BodyText"], fontName="Helvetica", fontSize=9.4, leading=13.4, textColor=colors.HexColor("#172033"), spaceAfter=6, alignment=TA_LEFT),
+            "h1": ParagraphStyle("ReportH1", parent=base["Title"], fontName="Helvetica-Bold", fontSize=24, leading=28, textColor=colors.HexColor("#173f5f"), spaceAfter=12, keepWithNext=True),
+            "h2": ParagraphStyle("ReportH2", parent=base["Heading2"], fontName="Helvetica-Bold", fontSize=15, leading=18, textColor=colors.HexColor("#173f5f"), spaceBefore=14, spaceAfter=6, keepWithNext=True),
+            "h3": ParagraphStyle("ReportH3", parent=base["Heading3"], fontName="Helvetica-Bold", fontSize=11.5, leading=14.5, textColor=colors.HexColor("#285d75"), spaceBefore=10, spaceAfter=4, keepWithNext=True),
+            "body": ParagraphStyle("ReportBody", parent=base["BodyText"], fontName="Helvetica", fontSize=9.8, leading=14.1, textColor=colors.HexColor("#172033"), spaceAfter=7, alignment=TA_JUSTIFY),
             "small": ParagraphStyle("ReportSmall", parent=base["BodyText"], fontName="Helvetica", fontSize=8.2, leading=10.5, textColor=colors.HexColor("#52606d"), spaceAfter=4),
             "quote": ParagraphStyle("ReportQuote", parent=base["BodyText"], fontName="Helvetica-Oblique", fontSize=9.2, leading=12.5, textColor=colors.HexColor("#173f5f"), leftIndent=7, rightIndent=7, spaceAfter=4),
             "table": ParagraphStyle("ReportTable", parent=base["BodyText"], fontName="Helvetica", fontSize=7.8, leading=10, textColor=colors.HexColor("#172033"), spaceAfter=0),
@@ -283,8 +284,9 @@ class ReportRenderer:
             canvas.line(doc.leftMargin, 11 * mm, A4[0] - doc.rightMargin, 11 * mm)
             canvas.setFont("Helvetica", 7.5)
             canvas.setFillColor(colors.HexColor("#52606d"))
-            canvas.drawString(doc.leftMargin, 7 * mm, "CoreDump student study report")
-            canvas.drawRightString(A4[0] - doc.rightMargin, 7 * mm, f"{document.page}")
+            running_title = self.title if len(self.title) <= 62 else self.title[:59] + "..."
+            canvas.drawString(doc.leftMargin, 7 * mm, running_title)
+            canvas.drawRightString(A4[0] - doc.rightMargin, 7 * mm, f"Lecture notes  |  {document.page}")
             canvas.restoreState()
 
         doc.addPageTemplates([PageTemplate(id="report", frames=[frame], onPage=footer)])

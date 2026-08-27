@@ -400,5 +400,70 @@ where the proof relies on bounded timeout and static membership. Construct a
 trace with two initiators, one dead neighbor, a late ACK, and the freshest
 candidate crashing. Mark which behavior is implemented and which recovery step
 still needs evidence.</p>
+<div class="page-break"></div>
+<h2>24. Lecture synthesis: election chooses a safe continuation point</h2>
+<p>Leader election is often introduced as “pick the process with the highest
+ID.” That is not sufficient here. The next coordinator will order and recover
+replicated updates, so it should be the surviving candidate with the freshest
+known update evidence; replica ID breaks ties only when freshness is equal.
+Election is therefore a data-safety decision as well as a leadership decision.</p>
+<p>The ring supplies a deterministic route for gathering candidates. Sort static
+replica IDs, send to the next available ID, receive an ACK, and continue until
+the token has completed its traversal. The ring is logical: messages still use
+Akka actor references and channel actors rather than a physical ring network.</p>
+<h3>24.1 Candidate ordering must be total and shared</h3>
+<p>Every participant must compare candidates with the same rule. First compare
+the latest known <code>EpochPair</code>; then compare replica ID as a deterministic tie
+breaker. Handle “no known update” explicitly so that <code>null</code> does not create
+different local interpretations. A comparator that is reflexive,
+antisymmetric, and transitive gives all replicas the same best candidate for
+the same candidate set.</p>
+<p>Freshness is meaningful only if candidate records accurately represent
+observed/committed history. Election cannot repair missing update metadata. It
+selects from the evidence supplied by replicas, which is why the state-history
+and election reports depend on each other.</p>
+<h3>24.2 ACK means the token has a next custodian</h3>
+<p>After forwarding the token, a replica waits for an ACK from the selected next
+ring neighbor. If that exact attempt times out, it marks the neighbor
+unavailable and tries the next ID. The ACK is not a vote for the final winner;
+it confirms handoff/progress for one hop. Confusing these meanings can make a
+quorum-based election implementation appear where the code actually uses ring
+circulation.</p>
+<p>Target ID and attempt version belong in the timeout message. A late ACK from a
+previous neighbor or a queued timeout for an earlier attempt must not alter the
+current handoff. This is the same generation principle used by heartbeat, now
+scoped to a ring edge rather than a watchdog.</p>
+<h3>24.3 Termination depends on explicit assumptions</h3>
+<p>With finite static membership, bounded detection time, and at least one
+reachable surviving path, repeated skipping cannot continue forever: each
+failed attempt adds a previously untried unavailable ID, and the ring contains
+a finite number of IDs. Eventually the token reaches a correct next
+participant or returns to the completion condition.</p>
+<p>That proof needs care when the candidate selected as winner crashes or when
+several tokens circulate. The surviving-majority assumption ensures many
+correct replicas exist but does not by itself define which token wins or how a
+half-completed announcement is superseded. The implementation needs explicit
+rules for competing election identities and completed-election memory.</p>
+<h3>24.4 Competing elections require convergence</h3>
+<p>Heartbeat expiry can occur at several followers near the same time. Staggered
+startup reduces collisions but cannot prove there is only one initiator. When
+two tokens concern the same failed coordinator, every replica must apply the
+same deterministic preference, forward or absorb consistently, and reject a
+late losing token after completion.</p>
+<p>Separate two comparisons. Token preference decides which collection process
+continues. Candidate preference decides which replica in the collected set is
+best qualified to lead. The winning token’s initiator need not be the elected
+coordinator. Logs and variable names should make that distinction visible.</p>
+<h3>24.5 Election completion begins recovery</h3>
+<p>Selecting a winner does not immediately make arbitrary new writes safe. The
+winner must announce a newer epoch, synchronize necessary state/history, wait
+for the defined barrier, reconfigure heartbeat roles, and only then resume
+updates. A test that observes <code>callbackOnCoordinatorElected</code> proves an election
+event; it does not prove safe post-failure service.</p>
+<p>To study the FSM, maintain a trace table containing local election state,
+token ID, failed coordinator, candidate set, unavailable IDs, pending target,
+attempt version, and timeout. Add one row per mailbox event. This table makes
+late ACK handling and competing-token decisions much easier to verify than a
+sequence diagram alone.</p>
 </body>
 </html>

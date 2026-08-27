@@ -369,5 +369,75 @@ timestamps do not define a global serialization.</p>
 <p>For each leaf, specify initial positions, target actor, messages injected,
 expected callback, and forbidden second callback. Then state whether the test
 proves the local FSM, the client queue, or a cross-subsystem consistency claim.</p>
+<div class="page-break"></div>
+<h2>22. Lecture synthesis: a local read still has a distributed meaning</h2>
+<p>The read protocol has few messages, but its semantics depend on the rest of the
+system. A contacted replica obtains <code>positions[index]</code> from actor-owned state
+and returns it. That operation is local and does not contact a quorum. The
+answer is meaningful only because the update protocol defines when values may
+enter <code>positions</code>, and recovery defines which state may be served after a term
+change. Simple mechanics therefore sit on top of a nontrivial consistency
+argument.</p>
+<p>This is a useful lesson in interface design: “read the local array” describes
+an implementation step, not a consistency level. To explain the contract, we
+must relate the result to a legal ordering of operations. The specification
+uses sequential consistency from each replica/client perspective, so the task
+is to find a single sequential history that preserves required program orders
+and produces the observed values. Wall-clock completion order alone does not
+construct that history.</p>
+<h3>22.1 Sequential consistency as a history exercise</h3>
+<p>Imagine C1 sends <code>write(x,5)</code> and waits for success before sending <code>read(x)</code>.
+The client queue orders the read after the write, so a legal history for C1
+must preserve that order. If the read returns 0 from the same logical session,
+either the write callback was emitted too early or visibility/session routing
+is wrong. By contrast, an overlapping read by C2 may be placed before the write
+in the sequential explanation if no required program-order edge forbids it.</p>
+<p>Sequential consistency is weaker than linearizability. It does not require the
+chosen order to respect every real-time precedence between independent
+clients. That does not make it arbitrary: each participant’s required order
+must be preserved, and every returned value must match the latest preceding
+write to that index in the proposed sequence. Writing the candidate history is
+more reliable than describing an outcome as merely “fresh” or “stale.”</p>
+<h3>22.2 The visibility point comes from WRITEOK</h3>
+<p>A participant may know about an UPDATE before it applies it. If reads exposed
+the proposed value immediately, one replica could return a value from an
+update that never gained quorum. The intended visibility point is the valid
+commit/materialization transition associated with WRITEOK. Therefore the read
+handler can be simple only if the state layer respects observed-versus-
+committed separation.</p>
+<p>During recovery, the system also needs a read policy. Serving the old snapshot
+may be safe for some defined histories but surprising; serving a partially
+installed snapshot can expose combinations never committed together. Blocking
+or rejecting reads during synchronization is often easier to reason about, but
+the exact policy must be stated and tested rather than inferred from the
+presence of a read handler.</p>
+<h3>22.3 Validation belongs before array access</h3>
+<p>An invalid index is not a distributed timeout. It is an input-domain error
+that can be detected synchronously within the receiving actor turn. Bounds
+must be checked before direct array indexing so the actor does not throw and
+enter Akka’s supervision behavior. The callback or error policy should be
+consistent with the course API and should still release the client’s current
+transaction.</p>
+<p>This boundary case teaches a broader rule: validate data at the point where it
+crosses into an assumption-heavy operation. The array assumes <code>0 &lt;= index &lt; length</code>; the FSM assumes a matching ID; the result handler assumes the expected
+sender. Each guard turns a runtime accident into an explicit protocol outcome.</p>
+<h3>22.4 Result and timeout form a terminal race</h3>
+<p>The replica’s reply and the client’s scheduled timeout travel independently.
+A result can be enqueued just before the deadline but handled after a timeout
+already in the mailbox. The client does not need a universal clock to resolve
+this race. It needs a local rule: the first valid terminal transition wins,
+completion clears the active FSM, and the later event is ignored by ID/state.</p>
+<p>Tests should assert both the chosen callback and the absence of a second one.
+They should also inject foreign and duplicate results explicitly. A test that
+only performs one healthy read establishes the happy path but says nothing
+about the protocol boundary where most asynchronous bugs occur.</p>
+<h3>22.5 What a read test can and cannot prove</h3>
+<p>A focused read test can prove request construction, routing, local bounds
+handling, result correlation, timeout behavior, and one callback. It cannot by
+itself prove that prior writes were committed in total order or that recovery
+installed a safe snapshot. To make that claim, start from a multi-replica
+history containing writes and failures, then use reads as observations of the
+resulting state. The read is the measuring instrument; the update and recovery
+protocols create the property being measured.</p>
 </body>
 </html>

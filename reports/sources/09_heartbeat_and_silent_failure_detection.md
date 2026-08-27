@@ -361,3 +361,98 @@ mindmap
 For every leaf, define the initial role, ID, version, incoming sender, and
 expected callback/message count. Include negative assertions: no watchdog reset
 for wrong sender and no second election request for repeated stale expiries.
+
+<div class="page-break"></div>
+
+## 23. Lecture synthesis: failure detectors produce suspicions, not facts
+
+A process that receives no message cannot distinguish “the coordinator
+crashed” from “the coordinator is slow” in a fully asynchronous system. The
+assignment makes detection workable by assuming controlled delays and accurate
+timeouts. Within that model, the heartbeat protocol turns prolonged silence
+into a suspicion strong enough to start election. The detector does not inspect
+the coordinator's memory or operating-system state; it reasons from missing
+evidence within a configured time bound.
+
+Two classic properties help organize this reasoning. **Completeness** asks
+whether a crashed coordinator is eventually suspected. **Accuracy** asks
+whether a healthy coordinator avoids suspicion. Periodic ticks, delivery, and
+watchdog expiry support completeness. A watchdog budget larger than the
+maximum healthy heartbeat gap supports accuracy. The code and tests should
+make both arguments, because fast detection with false elections is not a
+correct implementation of the assignment's assumptions.
+
+### 23.1 One logical role, many local state machines
+
+Every replica owns a local `HeartbeatTransaction`. At the coordinator, its FSM
+schedules ticks and broadcasts heartbeat messages. At a follower, its FSM
+watches for messages from the expected coordinator and restarts a watchdog.
+The coordinator-scoped transaction ID allows an arriving heartbeat to route to
+the corresponding local FSM; it does not mean the replicas share one Java
+object or one timer.
+
+This design keeps mutable state confined. Each follower can have a different
+remaining timeout because messages arrive at different times. They still agree
+on the coordinator identity and protocol term. When synchronization announces
+a new coordinator, every local FSM must transition role and install a new
+coordinator-scoped identity coherently.
+
+### 23.2 Why application timeouts are insufficient
+
+A write timeout detects failure only while a write is active at a vulnerable
+stage. If the coordinator crashes during an idle period, no request FSM exists
+to notice. Heartbeat is background liveness traffic: it maintains evidence of
+leadership even when clients are silent. Conversely, heartbeat should not be
+used to decide whether one update committed; the update FSM and history own
+that question.
+
+Keeping these detectors separate avoids tangled semantics. A write timeout may
+start election because expected coordinator progress stopped. A watchdog may
+start election because all coordinator traffic stopped. Both hand off to the
+same election subsystem, but their triggering evidence and timer budgets are
+different.
+
+### 23.3 Versioning closes the cancellation race
+
+Suppose watchdog version 8 expires and its message enters the follower's
+mailbox. Before that message is processed, a valid heartbeat is handled,
+version 8 is cancelled, and version 9 is scheduled. Cancellation cannot pull
+the already-enqueued version-8 message out of the mailbox. If the handler
+checks only its class or transaction ID, it starts a false election.
+
+Embedding the version in `WatchdogExpiredMsg` lets the handler compare the
+event with current actor-owned knowledge. Only expiry for the current version,
+current coordinator, and current watching state is actionable. This is an
+instance of a general asynchronous pattern: tag delayed work with the
+generation that authorized it, and validate that generation when consuming the
+result.
+
+### 23.4 Timing is a protocol parameter
+
+Let `H` be the coordinator heartbeat period, `D` the maximum one-way simulated
+delay, `S` scheduler/mailing jitter allowed by the environment, and `B` a
+bounded mailbox-processing allowance. A follower watchdog must be greater
+than the largest legal observed gap, roughly `H + D + S + B`. If ticks or
+delivery can bunch differently, derive the bound from that implementation
+rather than copying this expression blindly.
+
+Changing latency configuration without revisiting the watchdog can invalidate
+accuracy. Tests should include a heartbeat delivered near the maximum healthy
+gap and verify that it renews the watchdog, followed by true silence that
+causes exactly one election request. This demonstrates the boundary rather
+than merely exercising the easy zero-delay path.
+
+### 23.5 Heartbeat is not a lease
+
+A follower receiving recent heartbeat traffic believes the coordinator is
+alive; it does not grant the coordinator an exclusive time-bounded lease that
+prevents another actor from claiming leadership. Leadership safety comes from
+election identity, candidate choice, epoch transition, and synchronization.
+Calling the watchdog a lease would teach a stronger guarantee than the code
+implements.
+
+The official Akka [*Classic
+Scheduler*](https://doc.akka.io/libraries/akka-core/current/scheduler.html)
+documentation also warns that scheduled events are not exact and cancellation
+cannot abort work that already began. The version guard in this project is the
+protocol-level response to that runtime behavior.

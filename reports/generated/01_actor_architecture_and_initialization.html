@@ -406,5 +406,90 @@ queued timer arrives after the state becomes <code>CRASHED</code>. For each test
 the expected absence of side effects as well as the expected message. A good
 answer names what must not change: position, history, active transaction count,
 or listener callback count.</p>
+<div class="page-break"></div>
+<h2>21. Lecture synthesis: an actor is a boundary, not a thread wrapper</h2>
+<p>The most productive way to learn Akka is to stop picturing an actor as an
+ordinary object that happens to run on another thread. An actor is a boundary
+around state, behavior, and an inbox. Code outside that boundary holds an
+<code>ActorRef</code>, which is an address-like capability for sending messages. It does
+not hold the actor instance and cannot call <code>Replica.setPosition</code> remotely.
+The runtime may execute different mailbox turns on different worker threads,
+but that scheduling detail is deliberately hidden from the protocol. The
+programmer’s unit of reasoning is the mailbox turn: receive one message,
+inspect actor-owned state, make local changes, and send or schedule later
+messages.</p>
+<p>This model gives local atomicity, not distributed atomicity. During one
+<code>Replica</code> handler, another handler for the same replica will not interleave.
+Replica 2, however, may process an ACK while replica 1 is still handling an
+UPDATE. A send with <code>tell</code> also returns before the receiver handles the
+message. Therefore a line that sends <code>WRITEOK</code> does not mean that the update is
+already visible elsewhere. It means only that a new event has been introduced
+into the asynchronous system. Protocol state must represent everything that
+remains uncertain after that send.</p>
+<h3>21.1 Why ordinary transaction objects are safe here</h3>
+<p><code>Transaction</code> subclasses are mutable FSM objects, yet they are not actors and
+do not own mailboxes. Their safety comes from confinement. A <code>Client</code> or
+<code>Replica</code> constructs the transaction, stores it in actor-owned state, and calls
+<code>start</code> or <code>computeState</code> only while processing its own mailbox. In effect, the
+actor is the concurrency boundary and the transaction is a modular piece of
+behavior inside that boundary. This is a useful composition technique: it
+avoids one huge receive method while preserving one serialized owner.</p>
+<p>Confinement would be broken if the same transaction object were stored in two
+actors or handed to a future that mutated it independently. Both actors could
+then enter <code>computeState</code> concurrently, and fields such as the FSM state, ACK
+set, or timeout handle would need conventional synchronization. The codebase
+instead sends immutable message data across boundaries and keeps the mutable
+conversation state at one owner.</p>
+<h3>21.2 Receive order is part of the architecture</h3>
+<p>The <code>createReceive</code> builder is a routing table evaluated for each dequeued
+message. Specific entry messages appear before a broad fallback because some
+events create a transaction rather than belong to an existing one. For
+example, the first election token may require <code>Replica.onElectionMsg</code> to
+construct election state. Only later messages with the same transaction ID can
+be delivered through the ordinary active-transaction lookup. If <code>matchAny</code>
+captures the token first, no FSM exists to receive it.</p>
+<p>There are thus two state machines in the receive path. The actor-level machine
+decides whether the replica is initialized, crashed, or allowed to create a
+conversation. The transaction-level machine decides whether a routed message
+is valid in <code>WAITING_ACK</code>, <code>WATCHING</code>, <code>SYNCHRONIZING</code>, or another protocol
+state. A transaction ID passing the first routing check does not bypass sender,
+epoch, generation, or state validation in the second machine.</p>
+<h3>21.3 Initialization establishes shared context without shared state</h3>
+<p>Two-phase initialization is a small example of distributed bootstrapping. The
+program must first create every actor to obtain stable <code>ActorRef</code>s. It can then
+send each replica an immutable membership map and initial coordinator. All
+replicas learn the same topology, but each stores its own copy of mutable
+protocol state. “Same information” is not the same as “same mutable object.”
+That distinction preserves actor encapsulation while giving every participant
+the addresses needed for broadcast and ring navigation.</p>
+<p>Startup also creates an ordering question. A message sent by the fixture after
+<code>InitSystem</code> from the same sender to the same replica follows that sender’s
+order. Traffic arriving through another sender or intermediary does not gain
+that relationship automatically. A robust design either controls startup
+traffic or makes the uninitialized state explicit. This is the first place a
+student should practice writing assumptions next to a sequence diagram.</p>
+<h3>21.4 Simulated crash versus Akka lifecycle failure</h3>
+<p>The assignment’s <code>Crash</code> message changes protocol behavior while keeping the
+actor and <code>ActorRef</code> alive. That is different from an actor throwing an
+exception, being restarted by supervision, or being stopped and sending later
+messages to dead letters. The simulated model is intentional: tests can choose
+a deterministic protocol point and then observe that the replica produces no
+more useful traffic. Every receive entry, timer, and send helper must respect
+the crash state for the illusion to be complete.</p>
+<p>When reviewing this boundary, ask three questions for every message type:
+Who owns the mutable fields it can change? Which actor-level guard runs before
+the FSM? What externally visible messages or callbacks can it produce? Those
+questions turn an Akka receive builder from framework syntax into an
+architectural map.</p>
+<h3>21.5 Primary Akka reading</h3>
+<p>The official Akka Classic chapters <a href="https://doc.akka.io/libraries/akka-core/current/general/actors.html"><em>What is an
+Actor?</em></a>,
+<a href="https://doc.akka.io/libraries/akka-core/current/general/addressing.html"><em>Actor References, Paths and
+Addresses</em></a>,
+and <a href="https://doc.akka.io/libraries/akka-core/current/actors.html"><em>Classic
+Actors</em></a> define the
+runtime concepts used here. The repository pins Akka 2.6.13, so examples in
+this report use the Classic Java API (<code>AbstractActor</code>, <code>Props</code>, <code>ActorRef</code>, and
+<code>Receive</code>) rather than silently switching to the newer typed API.</p>
 </body>
 </html>

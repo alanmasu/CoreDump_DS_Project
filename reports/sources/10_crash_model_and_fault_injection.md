@@ -344,3 +344,88 @@ Choose one leaf from each branch and form a scenario. Record initial state,
 exact injection transition, allowed final states, and forbidden output. Repeat
 the same scenario on the relevant feature ref because crash-category placement
 may differ across branches.
+
+<div class="page-break"></div>
+
+## 23. Lecture synthesis: a fault model defines the experiment
+
+Distributed protocols are never “fault tolerant” without qualification. They
+tolerate faults from a stated model. This assignment uses crash-stop replicas,
+static membership, reliable FIFO channels, bounded simulated delay, and the
+assumption that a strict majority remains correct. It does not model Byzantine
+messages, disk corruption, arbitrary network partition, or a crashed replica
+recovering with stale storage. Every correctness claim in the reports is scoped
+to those choices.
+
+The simulated crash keeps the Akka actor alive but changes its externally
+observable behavior to resemble a stopped node. This gives the test harness
+precise control: it can request a crash after the second ACK or during WRITEOK
+dissemination without killing a JVM. The model is valid only if all protocol
+entry and exit paths honor the crashed mode.
+
+### 23.1 Crash state is a cross-cutting guard
+
+Incoming network messages, public request handlers, special election entries,
+self-scheduled timeout messages, broadcast helpers, and direct unicast helpers
+are distinct paths. Guarding only the generic message dispatcher leaves holes.
+A previously scheduled heartbeat tick could still broadcast, or a special
+`SynchronizationMsg` handler could mutate state after the nominal crash.
+
+An audit should enumerate the receive builder and every method that sends
+traffic. For each path, state whether it is blocked in `CRASHED`, whether it can
+advance a pending crash counter, and whether it can emit a listener callback.
+This turns the cross-cutting requirement into a finite checklist.
+
+### 23.2 Deterministic triggers make failures reproducible
+
+“Crash after three outgoing UPDATE messages” is a protocol-relative trigger.
+It survives reasonable timing variation because it counts a named event.
+“Sleep 80 ms and crash” is wall-clock-relative and may hit a different state
+on a loaded machine. Deterministic injection is therefore not only a testing
+convenience; it is experimental control.
+
+The counter semantics must be exact. Decide whether the event that reaches
+zero is sent/processed before the crash or suppressed by it. Decide which
+message subclasses belong to each category and whether self-delivery counts.
+An off-by-one rule moves the fault window and can make a test appear to cover
+post-quorum failure while actually crashing before quorum.
+
+### 23.3 Injection machinery must not become protocol evidence
+
+The crash controller decides when a replica stops acting. It should not choose
+the election winner, fabricate ACKs, or repair history. Otherwise the test hook
+quietly changes the algorithm being tested. Callbacks such as “crash point
+reached” are observations for the harness; protocol peers should continue to
+learn failure only through the permitted timeout and message behavior.
+
+This separation lets the same production FSM run in normal and faulted tests.
+Only the environment's event schedule changes. It also makes traces easier to
+interpret: a survivor's election output is evidence of the protocol reacting,
+not the harness calling election directly.
+
+### 23.4 Negative evidence is essential
+
+After the crash callback, assert that the target sends no heartbeat, ACK,
+WRITEOK, election token, or synchronization response that the model forbids.
+Then separately assert that surviving replicas make progress. Observing only
+the survivor's success can miss a “zombie” crashed actor whose extra message
+helped the test pass. Observing only silence can miss a system that simply
+deadlocked.
+
+Silence assertions need a justified interval. It should cover the maximum
+legal delay for forbidden queued output without making the suite sleep
+arbitrarily. Where possible, combine listener events and FSM-specific timeout
+bounds to make the observation window explainable.
+
+### 23.5 Understand what the model leaves out
+
+A real Akka actor failure may involve supervision, restart, mailbox suspension,
+dead letters, and loss of in-memory fields. The course crash mode models none
+of those lifecycle mechanics. Similarly, keeping all actors in one JVM does
+not exercise serialization failure or physical host partition. These are not
+defects in a focused educational model, but they are limits that should be
+stated when transferring conclusions to production systems.
+
+A good oral explanation begins with the fault assumptions, shows the exact
+injection point, and ends with both safety and liveness observations. It does
+not claim that passing one crash scenario proves arbitrary resilience.

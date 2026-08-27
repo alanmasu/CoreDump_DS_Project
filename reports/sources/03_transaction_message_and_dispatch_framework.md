@@ -381,3 +381,96 @@ Oral-exam prompts: explain why transaction objects are not actors; explain why
 an epoch pair cannot replace a transaction ID; describe how entry messages
 create an FSM; and show why removal is a correctness event rather than memory
 cleanup alone. A strong answer includes a late-event example for each claim.
+
+<div class="page-break"></div>
+
+## 23. Lecture synthesis: transactions make distributed conversations explicit
+
+In this repository, a transaction is not a database transaction in the sense
+of locking rows or providing SQL rollback. It is a finite-state machine that
+remembers where one asynchronous conversation has reached. The conversation
+may wait for a replica result, a quorum of ACKs, an election-neighbor ACK, or a
+watchdog expiry. Because the next message arrives in a later mailbox turn, the
+FSM fields are the continuation of the algorithm: they store everything the
+stack frame can no longer remember.
+
+This perspective explains the three methods in the abstract base class.
+`start()` performs the transition out of the constructed state and emits the
+first event. `computeState(Msg)` consumes one later event and may update the FSM
+or its owner. `getState()` exposes the current control state for diagnostics.
+The base class also stores the owner, ID, start epoch, and timeout handle—the
+cross-cutting context shared by otherwise different protocols.
+
+### 23.1 Identity answers “which conversation?”, not “is it valid?”
+
+`TransactionId` combines an initiator `ActorRef` with a local sequence number.
+This is enough to distinguish transaction 7 created by client A from
+transaction 7 created by client B. Its purpose is correlation: a result or
+timeout carrying the ID can be routed back to the correct local FSM. It does
+not describe replicated update order, prove freshness, authorize a sender, or
+state whether the FSM still accepts that message.
+
+`EpochPair` answers a different question: where an update belongs in the
+replicated history. A timeout generation answers whether a scheduled event
+belongs to the current attempt. An actor ID answers which node sent or owns
+something. Good protocols keep these namespaces separate because each guards a
+different failure. Reusing one number for all four roles makes logs ambiguous
+and commonly lets a stale event pass an unrelated equality check.
+
+### 23.2 Dispatch is a sequence of narrowing predicates
+
+Follow an incoming ACK as if it passed through a series of gates. The actor's
+receive builder first recognizes its Java type. Crash and initialization state
+decide whether protocol traffic is allowed. The transaction ID lookup decides
+which FSM, if any, owns the conversation. The FSM state decides whether an ACK
+is meaningful now. Sender validation ensures it came from an expected
+participant. Finally, a set insertion decides whether this sender contributes
+a new acknowledgement.
+
+Each predicate prevents a distinct bug. Class matching prevents an unrelated
+payload reaching ACK logic. ID matching prevents cross-transaction
+interference. State matching rejects late events after completion. Sender
+matching prevents fabricated or misrouted evidence. Set semantics prevents one
+replica being counted twice toward quorum. Describing dispatch this way is more
+precise than saying “the actor forwards messages to transactions.”
+
+### 23.3 Lifecycle cleanup closes the protocol boundary
+
+Completion is a transition with three responsibilities: publish the terminal
+outcome, neutralize future events, and release scheduling state. A client must
+clear the current transaction before starting the queued successor. A replica
+must remove a finished FSM from `activeTransactions`. A timeout should be
+cancelled when possible. Mappings between parent and child conversations must
+also be removed.
+
+The ordering of those actions matters. If the next client request starts while
+the old transaction is still current, a late old result may be routed into the
+wrong logical window. If cleanup occurs before the callback and callback code
+throws, externally observable completion may be lost. The design should choose
+and test one terminal sequence, then make duplicate result and timeout events
+idempotent with respect to it.
+
+### 23.4 Parent and child FSMs express causality across roles
+
+A client write, the contacted replica's wrapper, and the coordinator's update
+are related but not identical conversations. Each owner allocates IDs in its
+own namespace and has a different timeout responsibility. The wrapper is a
+causal bridge: it remembers that child update U exists because parent request
+P arrived, and that successful U should eventually complete P. Translating the
+result back to P preserves the identity the client dispatcher understands.
+
+This structure resembles a small orchestration graph rather than one global
+transaction. Failure at the child can become a parent timeout; parent timeout
+does not erase a child commit; and a late child completion cannot reopen a
+closed parent. Drawing the graph with owner and ID on every node is one of the
+best debugging tools in the codebase.
+
+### 23.5 A reusable FSM review method
+
+For any transaction class, write a table with one row per state and one column
+per message type. In each cell record **accept**, **ignore**, or **reject and
+report**, plus the state mutation and outgoing messages. Then add rows for a
+wrong ID, wrong sender, wrong epoch, duplicate event, and stale timer. This
+table exposes implicit behavior hidden by nested `if` statements and supplies
+test cases directly. If two cells both produce terminal callbacks, verify that
+only one can be reached in one execution.
