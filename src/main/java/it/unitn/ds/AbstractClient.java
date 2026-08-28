@@ -188,7 +188,7 @@ public abstract class AbstractClient extends AbstractActor {
     // =================================================================================
 
     public void log(String msg) {
-        Logger.log("[Client " + getSelf().path().name() + "] " + msg);
+        Logger.debug("[Client " + getSelf().path().name() + "] " + msg);
     }
 
     public void debug(String msg) {
