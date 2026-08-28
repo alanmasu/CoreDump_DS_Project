@@ -282,6 +282,8 @@ public class UpdateTransaction extends Transaction {
      * Retries the client-originated update after a new coordinator has been elected.
      * The same transaction is kept so its connected WriteTransaction can still be
      * completed when the update commits.
+     *
+     * @param replica replica that completed the election
      */
     void resumeAfterElection(Replica replica) {
         if (this.state != UpdateTransactionState.WAITING_ELECTION || !this.writeTid.isPresent()) {

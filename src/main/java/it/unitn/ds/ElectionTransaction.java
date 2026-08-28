@@ -12,6 +12,14 @@ import java.util.Arrays;
 
 import akka.actor.ActorRef;
 
+/**
+ * Coordinates a ring-based election when a replica detects that the current
+ * coordinator has failed.
+ *
+ * <p>The transaction forwards an election token through the available
+ * replicas, selects the best candidate, and lets the winning replica publish
+ * the new coordinator and synchronized state.</p>
+ */
 public final class ElectionTransaction extends Transaction {
 
     private enum State {
@@ -39,6 +47,10 @@ public final class ElectionTransaction extends Transaction {
      *
      * A fully operational election must use the constructor that also
      * receives the failed coordinator and the replica group.
+     *
+     * @param id transaction identifier
+     * @param owner replica that owns this transaction
+     * @param startEpochPair epoch pair observed when the transaction was created
      */
     public ElectionTransaction(
             TransactionId id,
@@ -54,16 +66,41 @@ public final class ElectionTransaction extends Transaction {
         this.state = State.NEW;
     }
 
-    public ElectionTransaction(TransactionId id, DistributedActor owner, EpochPair startEpochPair,
-                                int failedCoordinatorId, Map<Integer, ActorRef> replicaRefs)
-    {
+    /**
+     * Creates an election transaction that participates in the election ring.
+     *
+     * @param id transaction identifier shared by the election token
+     * @param owner replica that owns this transaction
+     * @param startEpochPair epoch pair observed when the election started
+     * @param failedCoordinatorId identifier of the failed coordinator
+     * @param replicaRefs all replicas that can participate in the ring
+     */
+    public ElectionTransaction(
+            TransactionId id,
+            DistributedActor owner,
+            EpochPair startEpochPair,
+            int failedCoordinatorId,
+            Map<Integer, ActorRef> replicaRefs) {
         this(id, owner, startEpochPair, failedCoordinatorId, replicaRefs, true);
     }
 
-    public ElectionTransaction(TransactionId id, DistributedActor owner, EpochPair startEpochPair,
-                                int failedCoordinatorId, Map<Integer, ActorRef> replicaRefs,
-                                boolean localInitiator)
-    {
+    /**
+     * Creates an election transaction with an explicit initiator flag.
+     *
+     * @param id transaction identifier shared by the election token
+     * @param owner replica that owns this transaction
+     * @param startEpochPair epoch pair observed when the election started
+     * @param failedCoordinatorId identifier of the failed coordinator
+     * @param replicaRefs all replicas that can participate in the ring
+     * @param localInitiator whether this replica should send the first token
+     */
+    public ElectionTransaction(
+            TransactionId id,
+            DistributedActor owner,
+            EpochPair startEpochPair,
+            int failedCoordinatorId,
+            Map<Integer, ActorRef> replicaRefs,
+            boolean localInitiator) {
         super(id, owner, startEpochPair);
         this.failedCoordinatorId = failedCoordinatorId;
         this.replicaRefs = Map.copyOf(
@@ -81,17 +118,27 @@ public final class ElectionTransaction extends Transaction {
         this.state = State.NEW;
     }
     /**
-     *
      * Network message carrying the election token around the ring.
      *
-     * The candidate list is copied when the message is create, so later changes to the caller's list
-     * cannot modify a message already in transit.
+     * <p>The candidate list is copied when the message is created, so later
+     * changes to the caller's list cannot modify a message already in transit.</p>
      */
     public static final class ElectionMsg extends Msg {
 
+        /** Identifier of the coordinator that triggered this election. */
         public final int failedCoordinatorId;
+        /** Candidates collected by the election token so far. */
         public final List<ElectionCandidate> candidates;
 
+        /**
+         * Creates an election token message.
+         *
+         * @param transactionId identifier of the election transaction
+         * @param epochPair epoch pair associated with the election
+         * @param sender replica forwarding the token
+         * @param failedCoordinatorId identifier of the failed coordinator
+         * @param candidates candidates collected by the token
+         */
         public ElectionMsg(
             TransactionId transactionId,
             EpochPair epochPair,
@@ -119,6 +166,13 @@ public final class ElectionTransaction extends Transaction {
      */
     public static final class ElectionAckMsg extends Msg {
 
+        /**
+         * Creates an acknowledgement for an election token.
+         *
+         * @param transactionId identifier of the election transaction
+         * @param epochPair epoch pair associated with the election
+         * @param sender replica sending the acknowledgement
+         */
         public ElectionAckMsg(TransactionId transactionId, EpochPair epochPair, ActorRef sender) {
             super(transactionId, epochPair, sender);
         }
@@ -131,11 +185,20 @@ public final class ElectionTransaction extends Transaction {
      */
     public static final class ElectionAckTimeoutMsg extends Msg {
 
-        // The replica whose ACK we are waiting for
+        /** The replica whose acknowledgement is expected. */
         public final int expectedTargetId;
-        // Identifies the current timeout attempt
+        /** Version identifying the timeout attempt that expired. */
         public final long attemptVersion;
 
+        /**
+         * Creates a local election acknowledgement-timeout message.
+         *
+         * @param transactionId identifier of the election transaction
+         * @param epochPair epoch pair associated with the election
+         * @param sender replica waiting for the acknowledgement
+         * @param expectedTargetId replica whose acknowledgement is expected
+         * @param attemptVersion version of the timeout attempt
+         */
         public ElectionAckTimeoutMsg(
             TransactionId transactionId,
             EpochPair epochPair,
@@ -156,8 +219,17 @@ public final class ElectionTransaction extends Transaction {
      */
     public static final class ElectionStartMsg extends Msg {
 
+        /** Identifier of the coordinator whose failure triggered the election. */
         public final int failedCoordinatorId;
 
+        /**
+         * Creates a local message that starts an election after its delay.
+         *
+         * @param transactionId identifier of the election transaction, if known
+         * @param epochPair epoch pair observed when scheduling the election
+         * @param sender replica scheduling the election
+         * @param failedCoordinatorId identifier of the failed coordinator
+         */
         public ElectionStartMsg(
                 TransactionId transactionId,
                 EpochPair epochPair,
@@ -173,6 +245,13 @@ public final class ElectionTransaction extends Transaction {
      */
     public static final class ElectionRejectMsg extends Msg {
 
+        /**
+         * Creates a message rejecting a competing election token.
+         *
+         * @param transactionId identifier of the rejected election transaction
+         * @param epochPair epoch pair associated with the election
+         * @param sender replica rejecting the token
+         */
         public ElectionRejectMsg(
                 TransactionId transactionId,
                 EpochPair epochPair,
@@ -187,11 +266,25 @@ public final class ElectionTransaction extends Transaction {
      */
     public static final class SynchronizationMsg extends Msg {
 
+        /** Identifier of the coordinator whose failure triggered the election. */
         public final int failedCoordinatorId;
+        /** Identifier of the newly elected coordinator. */
         public final int newCoordinatorId;
+        /** Epoch pair assigned to the new coordinator term. */
         public final EpochPair newEpochPair;
         private final int[] positions;
 
+        /**
+         * Creates a synchronization message carrying the authoritative state.
+         *
+         * @param transactionId identifier of the election transaction
+         * @param epochPair epoch pair associated with the election
+         * @param sender newly elected coordinator
+         * @param failedCoordinatorId identifier of the failed coordinator
+         * @param newCoordinatorId identifier of the new coordinator
+         * @param newEpochPair epoch pair assigned to the new coordinator term
+         * @param positions authoritative positions snapshot
+         */
         public SynchronizationMsg(
                 TransactionId transactionId,
                 EpochPair epochPair,
@@ -213,12 +306,23 @@ public final class ElectionTransaction extends Transaction {
                     positions.length);
         }
 
+        /**
+         * Returns a copy of the synchronized positions snapshot.
+         *
+         * @return copy of the authoritative positions
+         */
         public int[] getPositions() {
             return Arrays.copyOf(positions, positions.length);
         }
     }
 
-    // TODO: Need javadoc here
+    /**
+     * Candidate considered by the election ordering algorithm.
+     *
+     * <p>A candidate with an observed update is preferred over one without an
+     * observed update. Among observed updates, the newest epoch pair wins;
+     * replica ID breaks ties.</p>
+     */
     public static final class ElectionCandidate implements Comparable<ElectionCandidate>, Serializable {
 
         private static final long serialVersionUID = 1L;
@@ -226,6 +330,12 @@ public final class ElectionTransaction extends Transaction {
         private final boolean hasObservedUpdate;
         private final EpochPair latestObservedEpochPair;
 
+        /**
+         * Creates a candidate with an observed update.
+         *
+         * @param replicaId identifier of the candidate replica
+         * @param latestObservedEpochPair newest update epoch pair observed by the replica
+         */
         public ElectionCandidate(int replicaId, EpochPair latestObservedEpochPair) {
 
             this.replicaId = replicaId;
@@ -234,26 +344,50 @@ public final class ElectionTransaction extends Transaction {
                 latestObservedEpochPair,
                 "latestObservedEpochPair must not be null.");
         }
-
-
+        /**
+         * Creates a candidate without an observed update.
+         *
+         * @param replicaId identifier of the candidate replica
+         */
         public ElectionCandidate(int replicaId) {
             this.replicaId = replicaId;
             this.hasObservedUpdate = false;
             this.latestObservedEpochPair = null;
         }
 
+        /**
+         * Reports whether this candidate has an observed update.
+         *
+         * @return true when an epoch pair was observed
+         */
         public boolean hasObservedUpdate() {
             return hasObservedUpdate;
         }
 
+        /**
+         * Returns the candidate replica identifier.
+         *
+         * @return candidate replica identifier
+         */
         public int getReplicaId() {
             return replicaId;
         }
 
+        /**
+         * Returns the newest update epoch pair observed by this candidate.
+         *
+         * @return observed epoch pair, or null when no update was observed
+         */
         public EpochPair getLatestObservedEpochPair() {
             return latestObservedEpochPair;
         }
 
+        /**
+         * Compares candidates according to the election winner ordering.
+         *
+         * @param other candidate to compare with this candidate
+         * @return a positive value when this candidate is preferred
+         */
         @Override
         public int compareTo(ElectionCandidate other) {
             Objects.requireNonNull(other, "other candidate must not be null");
@@ -277,10 +411,18 @@ public final class ElectionTransaction extends Transaction {
     }
 
 
+    /**
+     * Provides sorted-ring traversal while skipping unavailable replicas.
+     */
     public static final class RingNavigation {
 
         private final List<Integer> ringReplicaIds;
 
+        /**
+         * Creates ring navigation for the supplied replica identifiers.
+         *
+         * @param replicaIds identifiers in the replica group
+         */
         public RingNavigation(List<Integer> replicaIds) {
             Objects.requireNonNull(replicaIds, "replicaIds must not be null");
 
@@ -309,6 +451,15 @@ public final class ElectionTransaction extends Transaction {
             this.ringReplicaIds = Collections.unmodifiableList(sortedIds);
         }
 
+        /**
+         * Finds the next available replica after the current replica.
+         *
+         * @param currentReplicaId identifier of the current replica
+         * @param unavailableReplicaIds identifiers that must be skipped
+         * @return identifier of the next available replica, with wraparound
+         * @throws IllegalArgumentException when the current replica is not in the ring
+         * @throws IllegalStateException when no available replica exists
+         */
         public int nextReplicaId(int currentReplicaId, Set<Integer> unavailableReplicaIds) {
             Objects.requireNonNull(
                 unavailableReplicaIds,
@@ -337,6 +488,11 @@ public final class ElectionTransaction extends Transaction {
         }
     }
 
+    /**
+     * Returns the coordinator whose failure started this election.
+     *
+     * @return failed coordinator identifier
+     */
     public int getFailedCoordinatorId() {
         return failedCoordinatorId;
     }
@@ -637,11 +793,22 @@ public final class ElectionTransaction extends Transaction {
 
 
 
+    /**
+     * Returns the current election state.
+     *
+     * @return current state name
+     */
     @Override
     public String getState() {
         return state.toString();
     }
 
+    /**
+     * Processes one message belonging to this election transaction.
+     *
+     * @param msg election message to process
+     * @throws IllegalArgumentException when the message type is unsupported
+     */
     @Override
     public void computeState(Msg msg) {
         if (msg instanceof ElectionMsg) {
@@ -669,6 +836,12 @@ public final class ElectionTransaction extends Transaction {
                         + msg.getClass().getSimpleName());
     }
 
+    /**
+     * Starts the election token when this transaction is the local initiator.
+     *
+     * <p>Non-initiating transactions wait for the first token received from
+     * another replica.</p>
+     */
     @Override
     public void start() {
         if (state != State.NEW) {

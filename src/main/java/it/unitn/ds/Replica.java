@@ -421,6 +421,11 @@ public class Replica extends AbstractReplica implements DistributedActor {
                 msg.sender);
     }
 
+    /**
+     * Schedules an election after this replica detects coordinator failure.
+     *
+     * @param failedCoordinatorId identifier of the suspected coordinator
+     */
     void startElection(int failedCoordinatorId) {
         if (completedElectionCoordinators.contains(failedCoordinatorId)
                 || startedElectionCoordinators.contains(failedCoordinatorId)
@@ -478,11 +483,21 @@ public class Replica extends AbstractReplica implements DistributedActor {
         scheduleTransaction(transaction);
     }
 
+    /**
+     * Starts the election transaction after the ring-priority delay expires.
+     *
+     * @param message local election-start message
+     */
     public void onElectionStartMsg(ElectionStartMsg message) {
         scheduledElectionCoordinators.remove(message.failedCoordinatorId);
         beginElection(message.failedCoordinatorId);
     }
 
+    /**
+     * Validates and dispatches an election token received from another replica.
+     *
+     * @param message election token to process
+     */
     public void onElectionMsg(ElectionMsg message) {
         if (this.replicaStatus == CrashStatus.CRASHED) {
             return;
@@ -627,6 +642,12 @@ public class Replica extends AbstractReplica implements DistributedActor {
                 message.transactionId.initiator);
     }
 
+    /**
+     * Removes a cancelled election from the transaction-ID registry.
+     *
+     * @param failedCoordinatorId identifier of the failed coordinator
+     * @param electionTransactionId identifier of the cancelled election
+     */
     void onElectionTransactionCancelled(
             int failedCoordinatorId,
             TransactionId electionTransactionId) {
@@ -636,6 +657,11 @@ public class Replica extends AbstractReplica implements DistributedActor {
         }
     }
 
+    /**
+     * Validates and applies the new coordinator's synchronization snapshot.
+     *
+     * @param message synchronization message from the elected coordinator
+     */
     public void onSynchronizationMsg(SynchronizationMsg message) {
         if (this.replicaStatus == CrashStatus.CRASHED) {
             return;
