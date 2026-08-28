@@ -133,7 +133,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * @param msg The message to be broadcasted.
      * @param includeSelf A boolean flag indicating whether to include the sender replica in the broadcast. If true, the message will also be sent to the sender replica; if false, it will be excluded.
      *
-     * @apiNote This method will be empowered in the future and will be able to send messages using total ordering
+     * <p><strong>Note:</strong> This method may be extended in the future to
+     * support total ordering.</p>
      */
     public void broadcast(Msg msg, boolean includeSelf) {
         if (this.replicaStatus == CrashStatus.CRASHED) {
@@ -163,7 +164,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * Sends a message to a specific replica.
      * @param msg The message to be sent.
      * @param target The replica to which the message will be sent.
-     * @apiNote This method will be empowered in the future and will be able to send messages using total ordering
+     * <p><strong>Note:</strong> This method may be extended in the future to
+     * support total ordering.</p>
      */
     @Override
     public void unicast(Msg msg, ActorRef target) {
