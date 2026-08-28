@@ -9,6 +9,7 @@ import it.unitn.ds.AbstractClient.WriteResult;
 import it.unitn.ds.AbstractClient.WriteTimeout;
 import it.unitn.ds.AbstractReplica;
 import it.unitn.ds.AbstractReplica.Crash;
+import it.unitn.ds.AbstractReplica.UpdateApplied;
 import it.unitn.ds.Client;
 import it.unitn.ds.Logger;
 import it.unitn.ds.TestsCommons;
@@ -95,6 +96,14 @@ class TestUpdateTransaction {
         assertEquals(0, writeResult.index, "The index in the WriteResult should match the requested index.");
         assertEquals(42, writeResult.value, "The value in the WriteResult should match the requested value.");
         assertEquals(true, writeResult.success, "The WriteResult should indicate a successful write.");
+
+        for (int replicaId = 0; replicaId < nNodes; replicaId++) {
+            UpdateApplied updateApplied = sys.probes.get(replicaId).expectMsgClass(
+                    getClientWriteTimeout(), UpdateApplied.class);
+            assertEquals(replicaId, updateApplied.replicaId);
+            assertEquals(0, updateApplied.index);
+            assertEquals(42, updateApplied.value);
+        }
     }
 
     @Test

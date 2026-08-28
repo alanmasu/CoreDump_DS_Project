@@ -25,6 +25,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
     private Map<EpochPair, UpdateTransaction> updateHistory;
     private List<Transaction> activeTransactions;
     private int transactionCounter;
+    private int updateSequenceEpoch;
+    private int nextUpdateSequence;
     private EpochPair epochPair;
     private int positions[];
     private int coordinatorID;
@@ -63,6 +65,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.transactionCounter = 0;
         this.updateHistory = new HashMap<>();
         this.epochPair = new EpochPair(0, 0);
+        this.updateSequenceEpoch = this.epochPair.getEpoch();
+        this.nextUpdateSequence = this.epochPair.getSequence() + 1;
     }
 
     public static Props props(int id, int minLatency, int maxLatency, int coordinatorBeatInterval) {
@@ -157,6 +161,15 @@ public class Replica extends AbstractReplica implements DistributedActor {
      */
     public boolean isCoordinator() {
         return this.id == this.coordinatorID;
+    }
+
+    /**
+     * Returns the upper bound used while waiting for the next update phase.
+     *
+     * @return update phase timeout in milliseconds
+     */
+    long getUpdatePhaseTimeoutDelay() {
+        return 4L * getMaxLatencyPlusTolerance();
     }
     ////////////////////////////////////////////
 
@@ -264,6 +277,37 @@ public class Replica extends AbstractReplica implements DistributedActor {
             throw new IllegalArgumentException("New epochPair must be greater than or equal to the current epochPair");
         }
         this.epochPair = epochPair;
+
+        if (this.updateSequenceEpoch != epochPair.getEpoch()) {
+            this.updateSequenceEpoch = epochPair.getEpoch();
+            this.nextUpdateSequence = epochPair.getSequence() + 1;
+        } else {
+            this.nextUpdateSequence = Math.max(this.nextUpdateSequence, epochPair.getSequence() + 1);
+        }
+    }
+
+    /**
+     * Reserves the next total-order identity for an update started by this
+     * coordinator. Reservation is separate from {@link #epochPair}: an update
+     * may be in flight before it is committed locally.
+     *
+     * @return a unique pair for the current coordinator epoch
+     * @throws IllegalStateException if this replica is not the coordinator
+     */
+    EpochPair reserveNextUpdateEpochPair() {
+        if (!isCoordinator()) {
+            throw new IllegalStateException("Only the coordinator can order updates");
+        }
+
+        int currentEpoch = this.epochPair.getEpoch();
+        if (this.updateSequenceEpoch != currentEpoch) {
+            this.updateSequenceEpoch = currentEpoch;
+            this.nextUpdateSequence = this.epochPair.getSequence() + 1;
+        }
+
+        EpochPair reserved = new EpochPair(this.updateSequenceEpoch, this.nextUpdateSequence);
+        this.nextUpdateSequence++;
+        return reserved;
     }
 
     /**
@@ -278,8 +322,11 @@ public class Replica extends AbstractReplica implements DistributedActor {
      * Adds an UpdateTransaction to the update history of the replica.
      * @param updateTransaction The UpdateTransaction to be added to the history.
      */
-    public void addUpdateToHistory(UpdateTransaction updateTransaction) {
-        this.updateHistory.put(getEpochPair(), updateTransaction);
+    public void addUpdateToHistory(EpochPair updateId, UpdateTransaction updateTransaction) {
+        if (updateId == null) {
+            throw new IllegalArgumentException("Committed updates must have an EpochPair");
+        }
+        this.updateHistory.put(updateId, updateTransaction);
     }
 
     @Override
