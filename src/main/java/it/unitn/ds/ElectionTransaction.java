@@ -1,16 +1,15 @@
 package it.unitn.ds;
 
+import akka.actor.ActorRef;
 import java.io.Serializable;
-import java.util.Objects;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.Map;
-import java.util.Arrays;
-
-import akka.actor.ActorRef;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * Coordinates a ring-based election when a replica detects that the current
@@ -20,6 +19,7 @@ import akka.actor.ActorRef;
  * replicas, selects the best candidate, and lets the winning replica publish
  * the new coordinator and synchronized state.</p>
  */
+@SuppressWarnings("PMD.NullAssignment")
 public final class ElectionTransaction extends Transaction {
 
     private enum State {
@@ -52,10 +52,7 @@ public final class ElectionTransaction extends Transaction {
      * @param owner replica that owns this transaction
      * @param startEpochPair epoch pair observed when the transaction was created
      */
-    public ElectionTransaction(
-            TransactionId id,
-            DistributedActor owner,
-            EpochPair startEpochPair) {
+    public ElectionTransaction(TransactionId id, DistributedActor owner, EpochPair startEpochPair) {
         super(id, owner, startEpochPair);
         this.failedCoordinatorId = -1;
         this.replicaRefs = Map.of();
@@ -103,14 +100,9 @@ public final class ElectionTransaction extends Transaction {
             boolean localInitiator) {
         super(id, owner, startEpochPair);
         this.failedCoordinatorId = failedCoordinatorId;
-        this.replicaRefs = Map.copyOf(
-            Objects.requireNonNull(
-                replicaRefs,
-                "replicaRefs must not be null")
-        );
+        this.replicaRefs = Map.copyOf(Objects.requireNonNull(replicaRefs, "replicaRefs must not be null"));
 
-        this.ringNavigation = new RingNavigation(
-            List.copyOf(this.replicaRefs.keySet()));
+        this.ringNavigation = new RingNavigation(List.copyOf(this.replicaRefs.keySet()));
         this.localInitiator = localInitiator;
         this.unavailableReplicaIds = new HashSet<>();
         this.unavailableReplicaIds.add(failedCoordinatorId);
@@ -140,22 +132,15 @@ public final class ElectionTransaction extends Transaction {
          * @param candidates candidates collected by the token
          */
         public ElectionMsg(
-            TransactionId transactionId,
-            EpochPair epochPair,
-            ActorRef sender,
-            int failedCoordinatorId,
-            List<ElectionCandidate> candidates
-        )
-        {
+                TransactionId transactionId,
+                EpochPair epochPair,
+                ActorRef sender,
+                int failedCoordinatorId,
+                List<ElectionCandidate> candidates) {
             super(transactionId, epochPair, sender);
             this.failedCoordinatorId = failedCoordinatorId;
-            this.candidates = List.copyOf(
-                Objects.requireNonNull(
-                    candidates,
-                    "candidates must not be null")
-            );
+            this.candidates = List.copyOf(Objects.requireNonNull(candidates, "candidates must not be null"));
         }
-
     }
 
     /**
@@ -200,12 +185,11 @@ public final class ElectionTransaction extends Transaction {
          * @param attemptVersion version of the timeout attempt
          */
         public ElectionAckTimeoutMsg(
-            TransactionId transactionId,
-            EpochPair epochPair,
-            ActorRef sender,
-            int expectedTargetId,
-            long attemptVersion)
-        {
+                TransactionId transactionId,
+                EpochPair epochPair,
+                ActorRef sender,
+                int expectedTargetId,
+                long attemptVersion) {
             super(transactionId, epochPair, sender);
 
             this.expectedTargetId = expectedTargetId;
@@ -231,10 +215,7 @@ public final class ElectionTransaction extends Transaction {
          * @param failedCoordinatorId identifier of the failed coordinator
          */
         public ElectionStartMsg(
-                TransactionId transactionId,
-                EpochPair epochPair,
-                ActorRef sender,
-                int failedCoordinatorId) {
+                TransactionId transactionId, EpochPair epochPair, ActorRef sender, int failedCoordinatorId) {
             super(transactionId, epochPair, sender);
             this.failedCoordinatorId = failedCoordinatorId;
         }
@@ -252,10 +233,7 @@ public final class ElectionTransaction extends Transaction {
          * @param epochPair epoch pair associated with the election
          * @param sender replica rejecting the token
          */
-        public ElectionRejectMsg(
-                TransactionId transactionId,
-                EpochPair epochPair,
-                ActorRef sender) {
+        public ElectionRejectMsg(TransactionId transactionId, EpochPair epochPair, ActorRef sender) {
             super(transactionId, epochPair, sender);
         }
     }
@@ -272,6 +250,7 @@ public final class ElectionTransaction extends Transaction {
         public final int newCoordinatorId;
         /** Epoch pair assigned to the new coordinator term. */
         public final EpochPair newEpochPair;
+
         private final int[] positions;
 
         /**
@@ -292,18 +271,13 @@ public final class ElectionTransaction extends Transaction {
                 int failedCoordinatorId,
                 int newCoordinatorId,
                 EpochPair newEpochPair,
-                int[] positions) {
+                int... positions) {
             super(transactionId, epochPair, sender);
             this.failedCoordinatorId = failedCoordinatorId;
             this.newCoordinatorId = newCoordinatorId;
-            this.newEpochPair = Objects.requireNonNull(
-                    newEpochPair,
-                    "newEpochPair must not be null");
-            this.positions = Arrays.copyOf(
-                    Objects.requireNonNull(
-                            positions,
-                            "positions must not be null"),
-                    positions.length);
+            this.newEpochPair = Objects.requireNonNull(newEpochPair, "newEpochPair must not be null");
+            this.positions =
+                    Arrays.copyOf(Objects.requireNonNull(positions, "positions must not be null"), positions.length);
         }
 
         /**
@@ -327,7 +301,7 @@ public final class ElectionTransaction extends Transaction {
 
         private static final long serialVersionUID = 1L;
         private final int replicaId;
-        private final boolean hasObservedUpdate;
+        private final boolean observedUpdate;
         private final EpochPair latestObservedEpochPair;
 
         /**
@@ -339,10 +313,9 @@ public final class ElectionTransaction extends Transaction {
         public ElectionCandidate(int replicaId, EpochPair latestObservedEpochPair) {
 
             this.replicaId = replicaId;
-            this.hasObservedUpdate = true;
-            this.latestObservedEpochPair = Objects.requireNonNull(
-                latestObservedEpochPair,
-                "latestObservedEpochPair must not be null.");
+            this.observedUpdate = true;
+            this.latestObservedEpochPair =
+                    Objects.requireNonNull(latestObservedEpochPair, "latestObservedEpochPair must not be null.");
         }
         /**
          * Creates a candidate without an observed update.
@@ -351,7 +324,7 @@ public final class ElectionTransaction extends Transaction {
          */
         public ElectionCandidate(int replicaId) {
             this.replicaId = replicaId;
-            this.hasObservedUpdate = false;
+            this.observedUpdate = false;
             this.latestObservedEpochPair = null;
         }
 
@@ -361,7 +334,7 @@ public final class ElectionTransaction extends Transaction {
          * @return true when an epoch pair was observed
          */
         public boolean hasObservedUpdate() {
-            return hasObservedUpdate;
+            return observedUpdate;
         }
 
         /**
@@ -393,11 +366,11 @@ public final class ElectionTransaction extends Transaction {
             Objects.requireNonNull(other, "other candidate must not be null");
 
             // If just one candidate has observed update, return which one did.
-            if (hasObservedUpdate != other.hasObservedUpdate) {
-                return hasObservedUpdate ? 1 : -1;
+            if (observedUpdate != other.observedUpdate) {
+                return observedUpdate ? 1 : -1;
             }
 
-            if (hasObservedUpdate) {
+            if (observedUpdate) {
                 int epochPairComparison = latestObservedEpochPair.compareTo(other.latestObservedEpochPair);
 
                 if (epochPairComparison != 0) {
@@ -408,8 +381,36 @@ public final class ElectionTransaction extends Transaction {
             return Integer.compare(replicaId, other.replicaId);
         }
 
-    }
+        /**
+         * Compares this candidate with another candidate by value.
+         *
+         * @param other object to compare with this candidate
+         * @return true when both candidates contain the same election data
+         */
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof ElectionCandidate)) {
+                return false;
+            }
+            ElectionCandidate candidate = (ElectionCandidate) other;
+            return replicaId == candidate.replicaId
+                    && observedUpdate == candidate.observedUpdate
+                    && Objects.equals(latestObservedEpochPair, candidate.latestObservedEpochPair);
+        }
 
+        /**
+         * Returns a hash code consistent with {@link #equals(Object)}.
+         *
+         * @return hash code for this candidate
+         */
+        @Override
+        public int hashCode() {
+            return Objects.hash(replicaId, observedUpdate, latestObservedEpochPair);
+        }
+    }
 
     /**
      * Provides sorted-ring traversal while skipping unavailable replicas.
@@ -427,24 +428,20 @@ public final class ElectionTransaction extends Transaction {
             Objects.requireNonNull(replicaIds, "replicaIds must not be null");
 
             if (replicaIds.isEmpty()) {
-                throw new IllegalArgumentException(
-                    "replicaIds must not be empty");
+                throw new IllegalArgumentException("replicaIds must not be empty");
             }
 
             List<Integer> sortedIds = new ArrayList<>(replicaIds);
 
             for (Integer replicaId : sortedIds) {
-                Objects.requireNonNull(
-                    replicaId,
-                    "replica IDs must not contain null");
+                Objects.requireNonNull(replicaId, "replica IDs must not contain null");
             }
 
             Collections.sort(sortedIds);
 
             for (int i = 1; i < sortedIds.size(); i++) {
                 if (sortedIds.get(i).equals(sortedIds.get(i - 1))) {
-                    throw new IllegalArgumentException(
-                        "replica IDs must be unique");
+                    throw new IllegalArgumentException("replica IDs must be unique");
                 }
             }
 
@@ -461,14 +458,11 @@ public final class ElectionTransaction extends Transaction {
          * @throws IllegalStateException when no available replica exists
          */
         public int nextReplicaId(int currentReplicaId, Set<Integer> unavailableReplicaIds) {
-            Objects.requireNonNull(
-                unavailableReplicaIds,
-                "unavailableReplicaIds must not be null");
+            Objects.requireNonNull(unavailableReplicaIds, "unavailableReplicaIds must not be null");
 
             int currentIndex = ringReplicaIds.indexOf(currentReplicaId);
             if (currentIndex < 0) {
-                throw new IllegalArgumentException(
-                    "current replica is not part of the ring");
+                throw new IllegalArgumentException("current replica is not part of the ring");
             }
 
             // We need a for loop here since if an element is unavailable, we need to increment
@@ -483,8 +477,7 @@ public final class ElectionTransaction extends Transaction {
                 }
             }
 
-            throw new IllegalStateException(
-                "no available replica exists in the ring");
+            throw new IllegalStateException("no available replica exists in the ring");
         }
     }
 
@@ -499,8 +492,7 @@ public final class ElectionTransaction extends Transaction {
 
     private Replica getReplicaOwner() {
         if (!(owner instanceof Replica)) {
-            throw new IllegalStateException(
-                    "ElectionTransaction owner must be a Replica");
+            throw new IllegalStateException("ElectionTransaction owner must be a Replica");
         }
         return (Replica) owner;
     }
@@ -513,9 +505,7 @@ public final class ElectionTransaction extends Transaction {
         return new ElectionCandidate(replica.getId(), localEpochPair);
     }
 
-    private boolean containsLocalCandidate(
-            List<ElectionCandidate> candidates,
-            int replicaId) {
+    private boolean containsLocalCandidate(List<ElectionCandidate> candidates, int replicaId) {
         for (ElectionCandidate candidate : candidates) {
             if (candidate.getReplicaId() == replicaId) {
                 return true;
@@ -526,8 +516,7 @@ public final class ElectionTransaction extends Transaction {
 
     private ElectionCandidate bestCandidate(List<ElectionCandidate> candidates) {
         if (candidates.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Election candidate list must not be empty");
+            throw new IllegalArgumentException("Election candidate list must not be empty");
         }
 
         ElectionCandidate best = candidates.get(0);
@@ -540,9 +529,7 @@ public final class ElectionTransaction extends Transaction {
         return best;
     }
 
-    private List<ElectionCandidate> withoutCandidate(
-            List<ElectionCandidate> candidates,
-            int replicaId) {
+    private List<ElectionCandidate> withoutCandidate(List<ElectionCandidate> candidates, int replicaId) {
         List<ElectionCandidate> filtered = new ArrayList<>();
         for (ElectionCandidate candidate : candidates) {
             if (candidate.getReplicaId() != replicaId) {
@@ -589,26 +576,15 @@ public final class ElectionTransaction extends Transaction {
         return 2L * replica.getMaxLatencyPlusTolerance();
     }
 
-    private ElectionMsg createOutgoingMessage(
-            Replica replica,
-            List<ElectionCandidate> candidates) {
-        return new ElectionMsg(
-                getId(),
-                startEpochPair,
-                replica.getSelf(),
-                failedCoordinatorId,
-                candidates);
+    private ElectionMsg createOutgoingMessage(Replica replica, List<ElectionCandidate> candidates) {
+        return new ElectionMsg(getId(), startEpochPair, replica.getSelf(), failedCoordinatorId, candidates);
     }
 
-    private boolean sendToTarget(
-            List<ElectionCandidate> candidates,
-            int targetId) {
+    private boolean sendToTarget(List<ElectionCandidate> candidates, int targetId) {
         Replica replica = getReplicaOwner();
         ActorRef target = replicaRefs.get(targetId);
 
-        if (target == null
-                || target.equals(replica.getSelf())
-                || unavailableReplicaIds.contains(targetId)) {
+        if (target == null || target.equals(replica.getSelf()) || unavailableReplicaIds.contains(targetId)) {
             return false;
         }
 
@@ -620,64 +596,43 @@ public final class ElectionTransaction extends Transaction {
         replica.unicast(outgoing, target);
         timeout = replica.scheduleToItself(
                 electionAckTimeoutMillis(replica),
-                new ElectionAckTimeoutMsg(
-                        getId(),
-                        startEpochPair,
-                        replica.getSelf(),
-                        pendingTargetId,
-                        attemptVersion));
+                new ElectionAckTimeoutMsg(getId(), startEpochPair, replica.getSelf(), pendingTargetId, attemptVersion));
         return true;
     }
 
     private boolean forwardToNext(List<ElectionCandidate> candidates) {
         Replica replica = getReplicaOwner();
         try {
-            int nextReplicaId = ringNavigation.nextReplicaId(
-                    replica.getId(),
-                    unavailableReplicaIds);
+            int nextReplicaId = ringNavigation.nextReplicaId(replica.getId(), unavailableReplicaIds);
             return sendToTarget(candidates, nextReplicaId);
         } catch (IllegalStateException noAvailableReplica) {
             return false;
         }
     }
 
-    private void acknowledge(
-            ActorRef previousSender,
-            EpochPair messageEpochPair) {
+    private void acknowledge(ActorRef previousSender, EpochPair messageEpochPair) {
         if (previousSender == null) {
             return;
         }
 
         Replica replica = getReplicaOwner();
-        replica.unicast(
-                new ElectionAckMsg(
-                        getId(),
-                        messageEpochPair,
-                        replica.getSelf()),
-                previousSender);
+        replica.unicast(new ElectionAckMsg(getId(), messageEpochPair, replica.getSelf()), previousSender);
     }
 
-    private void finishWithCandidateList(
-            List<ElectionCandidate> candidates) {
+    private void finishWithCandidateList(List<ElectionCandidate> candidates) {
         Replica replica = getReplicaOwner();
         ElectionCandidate winner = bestCandidate(candidates);
 
         if (winner.getReplicaId() == replica.getId()) {
             state = State.ELECTED;
-            replica.completeElectionAsWinner(
-                    failedCoordinatorId,
-                    getId(),
-                    candidates);
+            replica.completeElectionAsWinner(failedCoordinatorId, getId(), candidates);
             return;
         }
 
         if (!sendToTarget(candidates, winner.getReplicaId())) {
             unavailableReplicaIds.add(winner.getReplicaId());
-            List<ElectionCandidate> remainingCandidates = withoutCandidate(
-                    candidates,
-                    winner.getReplicaId());
-            if (remainingCandidates.isEmpty()
-                    || !forwardToNext(remainingCandidates)) {
+            List<ElectionCandidate> remainingCandidates = withoutCandidate(candidates, winner.getReplicaId());
+            if (remainingCandidates.isEmpty() || !forwardToNext(remainingCandidates)) {
                 if (!remainingCandidates.isEmpty()) {
                     finishWithCandidateList(remainingCandidates);
                 } else {
@@ -701,17 +656,11 @@ public final class ElectionTransaction extends Transaction {
                 acknowledge(message.sender, message.epochPair);
                 finishWithCandidateList(candidates);
             } else {
-                boolean forwarded = sendToTarget(
-                        candidates,
-                        winner.getReplicaId());
+                boolean forwarded = sendToTarget(candidates, winner.getReplicaId());
                 if (!forwarded) {
                     unavailableReplicaIds.add(winner.getReplicaId());
-                    List<ElectionCandidate> remainingCandidates =
-                            withoutCandidate(
-                                    candidates,
-                                    winner.getReplicaId());
-                    forwarded = !remainingCandidates.isEmpty()
-                            && forwardToNext(remainingCandidates);
+                    List<ElectionCandidate> remainingCandidates = withoutCandidate(candidates, winner.getReplicaId());
+                    forwarded = !remainingCandidates.isEmpty() && forwardToNext(remainingCandidates);
                     if (!forwarded && !remainingCandidates.isEmpty()) {
                         finishWithCandidateList(remainingCandidates);
                     }
@@ -721,8 +670,7 @@ public final class ElectionTransaction extends Transaction {
             return;
         }
 
-        List<ElectionCandidate> updatedCandidates =
-                new ArrayList<>(candidates);
+        List<ElectionCandidate> updatedCandidates = new ArrayList<>(candidates);
         updatedCandidates.add(localCandidate(replica));
 
         boolean forwarded = forwardToNext(updatedCandidates);
@@ -733,16 +681,13 @@ public final class ElectionTransaction extends Transaction {
         }
     }
 
-    private void handleAcknowledgement(
-            ElectionAckMsg acknowledgement) {
+    private void handleAcknowledgement(ElectionAckMsg acknowledgement) {
         if (pendingMessage == null) {
             return;
         }
 
-        Integer acknowledgementSender =
-                replicaIdFor(acknowledgement.sender);
-        if (acknowledgementSender == null
-                || acknowledgementSender != pendingTargetId) {
+        Integer acknowledgementSender = replicaIdFor(acknowledgement.sender);
+        if (acknowledgementSender == null || acknowledgementSender != pendingTargetId) {
             return;
         }
 
@@ -757,14 +702,11 @@ public final class ElectionTransaction extends Transaction {
         pendingTargetId = -1;
 
         Replica replica = getReplicaOwner();
-        replica.onElectionTransactionCancelled(
-                failedCoordinatorId,
-                getId());
+        replica.onElectionTransactionCancelled(failedCoordinatorId, getId());
         replica.onTransactionComplete(this);
     }
 
-    private void handleTimeout(
-            ElectionAckTimeoutMsg timeoutMessage) {
+    private void handleTimeout(ElectionAckTimeoutMsg timeoutMessage) {
         if (pendingMessage == null
                 || timeoutMessage.attemptVersion != attemptVersion
                 || timeoutMessage.expectedTargetId != pendingTargetId) {
@@ -777,9 +719,8 @@ public final class ElectionTransaction extends Transaction {
         timeout = null;
         unavailableReplicaIds.add(timeoutMessage.expectedTargetId);
 
-        List<ElectionCandidate> remainingCandidates = withoutCandidate(
-                messageToForward.candidates,
-                timeoutMessage.expectedTargetId);
+        List<ElectionCandidate> remainingCandidates =
+                withoutCandidate(messageToForward.candidates, timeoutMessage.expectedTargetId);
 
         if (remainingCandidates.isEmpty()) {
             complete();
@@ -790,8 +731,6 @@ public final class ElectionTransaction extends Transaction {
             finishWithCandidateList(remainingCandidates);
         }
     }
-
-
 
     /**
      * Returns the current election state.
@@ -832,8 +771,7 @@ public final class ElectionTransaction extends Transaction {
         }
 
         throw new IllegalArgumentException(
-                "Unsupported election message: "
-                        + msg.getClass().getSimpleName());
+                "Unsupported election message: " + msg.getClass().getSimpleName());
     }
 
     /**
@@ -856,9 +794,7 @@ public final class ElectionTransaction extends Transaction {
 
         Replica replica = getReplicaOwner();
 
-        ElectionMsg initialMessage = createOutgoingMessage(
-                replica,
-                List.of(localCandidate(replica)));
+        ElectionMsg initialMessage = createOutgoingMessage(replica, List.of(localCandidate(replica)));
 
         if (!forwardToNext(initialMessage.candidates)) {
             finishWithCandidateList(initialMessage.candidates);
