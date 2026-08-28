@@ -274,7 +274,6 @@ public class UpdateTransaction extends Transaction {
     private void enterWaitingElection() {
         if (this.timeout != null) {
             this.timeout.cancel();
-            this.timeout = null;
         }
         this.state = UpdateTransactionState.WAITING_ELECTION;
     }

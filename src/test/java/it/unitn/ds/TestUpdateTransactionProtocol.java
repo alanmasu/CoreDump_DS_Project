@@ -8,8 +8,8 @@ import akka.testkit.TestActorRef;
 import it.unitn.ds.Transaction.TransactionId;
 import it.unitn.ds.UpdateTransaction.UpdateTimeoutMsg;
 import it.unitn.ds.UpdateTransaction.UpdateTransactionState;
-import it.unitn.ds.UpdateTransaction.WriteOkTimeoutMsg;
 import it.unitn.ds.UpdateTransaction.WriteOkMsg;
+import it.unitn.ds.UpdateTransaction.WriteOkTimeoutMsg;
 import org.junit.jupiter.api.Test;
 
 class TestUpdateTransactionProtocol {
@@ -42,11 +42,10 @@ class TestUpdateTransactionProtocol {
             replica.setCoordinatorID(0);
             TransactionId transactionId = new TransactionId(replicaRef, 1);
             EpochPair committedPair = new EpochPair(3, 7);
-            UpdateTransaction transaction = new UpdateTransaction(
-                    transactionId, replica, replica.getEpochPair(), 0, 42, null, null);
+            UpdateTransaction transaction =
+                    new UpdateTransaction(transactionId, replica, replica.getEpochPair(), 0, 42, null, null);
 
-            transaction.termination(
-                    replica, new WriteOkMsg(transactionId, committedPair, replicaRef, 0, 42));
+            transaction.termination(replica, new WriteOkMsg(transactionId, committedPair, replicaRef, 0, 42));
 
             assertEquals(committedPair, replica.getEpochPair());
             assertEquals(transaction, replica.getUpdateHistory().get(committedPair));
@@ -65,8 +64,8 @@ class TestUpdateTransactionProtocol {
             TransactionId transactionId = new TransactionId(replicaRef, 1);
             EpochPair updatePair = new EpochPair(0, 1);
 
-            UpdateTransaction waitingForUpdate = new UpdateTransaction(
-                    transactionId, replica, updatePair, 0, 42, ActorRef.noSender(), null);
+            UpdateTransaction waitingForUpdate =
+                    new UpdateTransaction(transactionId, replica, updatePair, 0, 42, ActorRef.noSender(), null);
             waitingForUpdate.state = UpdateTransactionState.WAITING_UPDATE;
             waitingForUpdate.computeState(new UpdateTimeoutMsg(transactionId, updatePair, replicaRef));
             assertEquals(UpdateTransactionState.WAITING_ELECTION.toString(), waitingForUpdate.getState());
@@ -74,12 +73,10 @@ class TestUpdateTransactionProtocol {
             UpdateTransaction waitingForWriteOk = new UpdateTransaction(
                     new TransactionId(replicaRef, 2), replica, updatePair, 0, 42, ActorRef.noSender(), null);
             waitingForWriteOk.state = UpdateTransactionState.WAITING_WRITEOK;
-            waitingForWriteOk.computeState(new WriteOkTimeoutMsg(
-                    waitingForWriteOk.getId(), updatePair, replicaRef));
+            waitingForWriteOk.computeState(new WriteOkTimeoutMsg(waitingForWriteOk.getId(), updatePair, replicaRef));
             assertEquals(UpdateTransactionState.WAITING_ELECTION.toString(), waitingForWriteOk.getState());
         } finally {
             system.terminate();
         }
     }
-
 }

@@ -98,11 +98,11 @@ class TestUpdateTransaction {
         assertEquals(true, writeResult.success, "The WriteResult should indicate a successful write.");
 
         for (int replicaId = 0; replicaId < nNodes; replicaId++) {
-            UpdateApplied updateApplied = sys.probes.get(replicaId).expectMsgClass(
-                    getClientWriteTimeout(), UpdateApplied.class);
-            assertEquals(replicaId, updateApplied.replicaId);
-            assertEquals(0, updateApplied.index);
-            assertEquals(42, updateApplied.value);
+            UpdateApplied updateApplied =
+                    sys.probes.get(replicaId).expectMsgClass(getClientWriteTimeout(), UpdateApplied.class);
+            assertEquals(replicaId, updateApplied.replicaId, "The callback should identify the reporting replica.");
+            assertEquals(0, updateApplied.index, "Every replica should apply the requested index.");
+            assertEquals(42, updateApplied.value, "Every replica should apply the requested value.");
         }
     }
 
