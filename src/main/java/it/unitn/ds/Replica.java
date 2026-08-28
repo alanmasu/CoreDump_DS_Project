@@ -407,6 +407,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
         // debug("Received UpdateMsg for transaction: " + msg.transactionId);
         // debug("Received UpdateMsg [index: " + msg.index + ", value: " + msg.value + "]");
         if (!msg.transactionId.initiator.equals(this.getSelf())) {
+            activeTransactions.removeIf(transaction ->
+                    transaction instanceof UpdateTransaction && transaction.getId().equals(msg.transactionId));
             UpdateTransaction transaction =
                     new UpdateTransaction(msg.transactionId, this, msg.epochPair, msg.index, msg.value, msg.sender);
             this.scheduleTransaction(transaction);

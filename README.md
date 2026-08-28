@@ -25,7 +25,7 @@ source "$HOME/.sdkman/bin/sdkman-init.sh"
 sdk install gradle 9.2.1
 ```
 
-## Build, Run, and Tets the Project
+## Build, run, and test the project
 
 ```bash
 ./gradlew build
@@ -33,14 +33,33 @@ sdk install gradle 9.2.1
 ./gradlew test
 ```
 
+`Main` is a small playground for the protocol. Running it without arguments
+runs all of the examples. You can also run one example at a time:
+
+```bash
+./gradlew run                         # all demonstrations
+./gradlew run --args=basic            # write through one replica, read another
+./gradlew run --args=concurrent       # concurrent writers and readers
+./gradlew run --args=majority         # exactly a strict majority remains alive
+./gradlew run --args=election         # coordinator crash before a new write
+./gradlew run --args=timeout          # expected read timeout from a crashed replica
+```
+
 ## Regression Testing suite
-To run regression tests use the command:
+Most of the tests we add live in the regression suite. For normal development,
+this is the command to run:
+
 ```bash
 ./gradlew regression
 ```
-or 
+
+It runs the project’s regression tests, including the concurrent read/write
+scenarios. The more complicated corner cases, including crashes, strict
+majority operation, and coordinator election, are covered there as well. To
+run the complete test suite, including the base tests, use:
+
 ```bash
-./gradlew test --tests Regression
+./gradlew test
 ```
 
 Every new functionality that is implemented must be accompanied by its tests. 

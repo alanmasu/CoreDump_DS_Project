@@ -115,7 +115,7 @@ public abstract class AbstractReplica extends AbstractActor {
     // =================================================================================
 
     public void log(String msg) {
-        Logger.log("[Replica " + id + "] " + msg);
+        Logger.debug("[Replica " + id + "] " + msg);
     }
 
     public void debug(String msg) {
