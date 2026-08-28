@@ -85,6 +85,14 @@ class TestUpdateTransaction {
         assertEquals(replica, writeTimeout.replica, "The replica in the WriteTimeout should match the target replica.");
     }
 
+    private void assertWriteSucceeded() {
+        startWriteTransaction(0, 42);
+        WriteResult writeResult = clientProbe.expectMsgClass(getClientWriteTimeout(), WriteResult.class);
+        assertEquals(0, writeResult.index, "The index in the WriteResult should match the requested index.");
+        assertEquals(42, writeResult.value, "The value in the WriteResult should match the requested value.");
+        assertEquals(true, writeResult.success, "The WriteResult should indicate a successful write.");
+    }
+
     Duration getClientWriteTimeout() {
         return Duration.ofMillis(TestsCommons.getClientWriteTimeout(AbstractReplica.MAX_LATENCY, sys.getNNodes()));
     }
@@ -117,6 +125,10 @@ class TestUpdateTransaction {
     void testUpdateCoordinatorCrash() {
         sys.actors.get(coordinatorId).tell(CRASH_NOW, ActorRef.noSender());
         sys.probes.get(coordinatorId).expectMsgClass(Crash.class);
-        assertWriteTimedOut();
+        if (sys.actors.get(coordinatorId).equals(replica)) {
+            assertWriteTimedOut();
+        } else {
+            assertWriteSucceeded();
+        }
     }
 }

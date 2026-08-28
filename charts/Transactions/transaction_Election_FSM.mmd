@@ -1,0 +1,49 @@
+---
+title: ElectionTransaction local FSM
+config:
+    theme: forest
+    layout: elk
+    markdownAutoWrap: false
+---
+
+stateDiagram-v2
+    direction TB
+
+    %% Transaction object is created but not active yet.
+    [*] --> NEW: constructed
+    %% Transaction participates in the election ring after Replica startup
+    %% arbitration has selected one election transaction for this failure term.
+    NEW --> PARTICIPATING: start()
+
+    %% After forwarding the token, the replica first waits for the next replica's ACK and
+    %% then waits for the token to return. It must still accept an ElectionMsg
+    %% while waiting for an ACK because different channels can interleave.
+    state PARTICIPATING {
+        direction TB
+
+        [*] --> WAITING_FOR_ACK: token forwarded
+        %% ACK and timeout transitions require the current forwarding attempt/version;
+        %% stale messages are ignored without changing state.
+    WAITING_FOR_ACK --> WAITING_FOR_TOKEN: ElectionAck / cancel timer
+    WAITING_FOR_ACK --> WAITING_FOR_ACK: ElectionAckTimeout / skip + resend
+    WAITING_FOR_ACK --> WAITING_FOR_ACK: ElectionMsg / ACK + forward
+    WAITING_FOR_ACK --> DONE: ElectionRejectMsg / cancel timer
+    WAITING_FOR_TOKEN --> WAITING_FOR_ACK: ElectionMsg / ACK + forward
+    WAITING_FOR_TOKEN --> DONE: ElectionRejectMsg
+    }
+
+    %% A completed token selects the local replica as the new coordinator.
+    WAITING_FOR_ACK --> ELECTED: completed token [winner] / cancel timeout
+    WAITING_FOR_TOKEN --> ELECTED: completed token [winner]
+    %% A non-winner learns the result from the elected coordinator.
+    %% Replica accepts only a synchronization from the announced coordinator
+    %% for the current failed-coordinator term and a newer epoch.
+    PARTICIPATING --> SYNCHRONIZING: SynchronizationMsg / cancel timer
+    %% The winner prepares authoritative history and announces the new term.
+    ELECTED --> SYNCHRONIZING: history ready / broadcast sync
+    %% Synchronization may involve multiple messages.
+    SYNCHRONIZING --> SYNCHRONIZING: missing update / apply in order
+    %% Recovery is complete.
+    SYNCHRONIZING --> DONE: synchronization completed
+
+    DONE --> [*]

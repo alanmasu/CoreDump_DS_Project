@@ -253,7 +253,7 @@ public final class HeartbeatTransaction extends Transaction {
 
         state = State.ELECTION_REQUESTED;
 
-        // TODO: ELECTION_TRANSACTION must be started here once it's implemented
+        getReplica().startElection(getReplica().getCoordinatorID());
     }
 
     @Override
