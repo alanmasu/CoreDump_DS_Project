@@ -5,6 +5,8 @@ import akka.actor.Props;
 import it.unitn.ds.HeartbeatTransaction.HeartbeatMsg;
 import it.unitn.ds.HeartbeatTransaction.WatchdogExpiredMsg;
 import it.unitn.ds.ProbeTransaction.ProbeMsg;
+import it.unitn.ds.ReadTransaction.ReadMsg;
+import it.unitn.ds.ReadTransaction.ReadResultMsg;
 import it.unitn.ds.Transaction.TransactionId;
 import it.unitn.ds.UpdateTransaction.UpdateAckMsg;
 import it.unitn.ds.UpdateTransaction.UpdateMsg;
@@ -332,6 +334,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
+                .match(ReadMsg.class, this::onReadMsg)
                 .match(UpdateMsg.class, this::onUpdateMsg)
                 .match(WriteMsg.class, this::onWriteMsg)
                 // Handle TestMsg messages, leave it as last
@@ -377,6 +380,12 @@ public class Replica extends AbstractReplica implements DistributedActor {
         } else {
             onMessage(msg);
         }
+    }
+
+    public void onReadMsg(ReadMsg msg) {
+        unicast(
+                new ReadResultMsg(msg.transactionId, msg.epochPair, getSelf(), getPosition(msg.index), this.id),
+                msg.sender);
     }
 
     /// For testing
