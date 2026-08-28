@@ -120,15 +120,13 @@ class TestCoordinatorCrashRecovery {
     }
 
     private CoordinatorElected expectCoordinatorElected(int replicaId) {
-        return system.probes
+        return (CoordinatorElected) system.probes
                 .get(replicaId)
-                .fishForSpecificMessage(
+                .fishForMessage(
                         writeTimeout(),
                         "wait for replica " + replicaId + " to observe a new coordinator",
                         message -> message instanceof CoordinatorElected elected
-                                        && elected.newCoordinatorId != COORDINATOR_ID
-                                ? elected
-                                : null);
+                                && elected.newCoordinatorId != COORDINATOR_ID);
     }
 
     private void expectApplied(int replicaId, int expectedValue) {
