@@ -15,7 +15,7 @@ public class UpdateTransaction extends Transaction {
     protected final int value;
 
     /** Destination ActorRef used for unicast communication, coord do not use it*/
-    protected final Optional<ActorRef> destination;
+    protected Optional<ActorRef> destination;
 
     /** Connected WriteTransactionId used to identify the WriteTransaction to complete after this one*/
     protected Optional<TransactionId> writeTid = Optional.empty();
@@ -276,6 +276,24 @@ public class UpdateTransaction extends Transaction {
             this.timeout.cancel();
         }
         this.state = UpdateTransactionState.WAITING_ELECTION;
+    }
+
+    /**
+     * Retries the client-originated update after a new coordinator has been elected.
+     * The same transaction is kept so its connected WriteTransaction can still be
+     * completed when the update commits.
+     */
+    void resumeAfterElection(Replica replica) {
+        if (this.state != UpdateTransactionState.WAITING_ELECTION || !this.writeTid.isPresent()) {
+            return;
+        }
+
+        if (!replica.isCoordinator()) {
+            this.destination = Optional.of(replica.getCoordinator());
+        }
+
+        this.state = UpdateTransactionState.INIT;
+        start();
     }
 
     protected void termination(Replica replica, WriteOkMsg writeOkMsg) {

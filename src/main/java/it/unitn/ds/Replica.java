@@ -76,7 +76,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.replicaStatus = CrashStatus.NONE;
         this.crashCount = 0;
         this.activeTransactions = new LinkedList<>();
-        this.transactionCounter = 0;
+        // Sequence 0 is reserved for the coordinator-scoped heartbeat transaction.
+        this.transactionCounter = INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE + 1;
         this.updateHistory = new HashMap<>();
         this.epochPair = new EpochPair(0, 0);
         this.updateSequenceEpoch = this.epochPair.getEpoch();
@@ -208,13 +209,8 @@ public class Replica extends AbstractReplica implements DistributedActor {
             throw new IllegalStateException("Cannot initialize heartbeat: coordinator is not in the replica group.");
         }
 
-        TransactionId heartbeatTransactionId;
-
-        if (this.isCoordinator()) {
-            heartbeatTransactionId = this.getNextTransactionId();
-        } else {
-            heartbeatTransactionId = new TransactionId(coordinator, INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE);
-        }
+        TransactionId heartbeatTransactionId =
+                new TransactionId(coordinator, INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE);
 
         this.heartbeatTransaction = new HeartbeatTransaction(heartbeatTransactionId, this, getEpochPair());
 
@@ -725,6 +721,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
 
         restartHeartbeat(newEpochPair);
         removeElectionTransactions(failedCoordinatorId);
+        resumeWaitingUpdatesAfterElection();
     }
 
     private void applySynchronization(SynchronizationMsg message) {
@@ -758,6 +755,15 @@ public class Replica extends AbstractReplica implements DistributedActor {
         callbackOnCoordinatorElected(message.newCoordinatorId);
         restartHeartbeat(message.newEpochPair);
         removeElectionTransactions(message.failedCoordinatorId);
+        resumeWaitingUpdatesAfterElection();
+    }
+
+    private void resumeWaitingUpdatesAfterElection() {
+        for (Transaction transaction : new ArrayList<>(activeTransactions)) {
+            if (transaction instanceof UpdateTransaction) {
+                ((UpdateTransaction) transaction).resumeAfterElection(this);
+            }
+        }
     }
 
     private void restartHeartbeat(EpochPair epochPair) {
