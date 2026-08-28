@@ -123,7 +123,9 @@ class TestConcurrentWriteReadWorkload {
     }
 
     private void sendWrite(ActorRef writer, int value) {
-        writer.tell(new WriteRequest(INDEX, value, null), writer == writerA ? writerAProbe.getRef() : writerBProbe.getRef());
+        writer.tell(
+                new WriteRequest(INDEX, value, null),
+                writer == writerA ? writerAProbe.getRef() : writerBProbe.getRef());
     }
 
     private void sendReads(ActorRef reader) {
@@ -170,9 +172,8 @@ class TestConcurrentWriteReadWorkload {
     private List<Integer> expectAppliedUpdatesOnReadTarget() {
         List<Integer> appliedValues = new ArrayList<>();
         for (int i = 0; i < WRITE_VALUES.length; i++) {
-            UpdateApplied update = system.probes
-                    .get(READER_TARGET_ID)
-                    .expectMsgClass(writeTimeout(), UpdateApplied.class);
+            UpdateApplied update =
+                    system.probes.get(READER_TARGET_ID).expectMsgClass(writeTimeout(), UpdateApplied.class);
             assertEquals(INDEX, update.index, "Every applied update should target the requested index");
             appliedValues.add(update.value);
         }
