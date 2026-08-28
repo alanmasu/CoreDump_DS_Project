@@ -5,9 +5,17 @@ import akka.actor.Props;
 import it.unitn.ds.HeartbeatTransaction.HeartbeatMsg;
 import it.unitn.ds.HeartbeatTransaction.WatchdogExpiredMsg;
 import it.unitn.ds.ProbeTransaction.ProbeMsg;
+import it.unitn.ds.ReadTransaction.ReadMsg;
+import it.unitn.ds.ReadTransaction.ReadResultMsg;
 import it.unitn.ds.Transaction.TransactionId;
+import it.unitn.ds.UpdateTransaction.UpdateAckMsg;
+import it.unitn.ds.UpdateTransaction.UpdateMsg;
+import it.unitn.ds.UpdateTransaction.UpdateTimeoutMsg;
+import it.unitn.ds.UpdateTransaction.WriteOkMsg;
+import it.unitn.ds.UpdateTransaction.WriteOkTimeoutMsg;
 import it.unitn.ds.WriteTransaction.WriteFinishMsg;
 import it.unitn.ds.WriteTransaction.WriteMsg;
+import java.util.HashMap;
 import it.unitn.ds.ElectionTransaction.ElectionMsg;
 import it.unitn.ds.ElectionTransaction.ElectionStartMsg;
 import it.unitn.ds.ElectionTransaction.SynchronizationMsg;
@@ -21,14 +29,15 @@ import java.util.Optional;
 import java.util.Set;
 
 public class Replica extends AbstractReplica implements DistributedActor {
-
     private static final int INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE = 0;
     private Map<Integer, ActorRef> groupOfReplicas;
+    private Map<EpochPair, UpdateTransaction> updateHistory;
     private List<Transaction> activeTransactions;
     private int transactionCounter;
+    private int updateSequenceEpoch;
+    private int nextUpdateSequence;
     private int electionTransactionCounter;
     private EpochPair epochPair;
-
     private int positions[];
     private int coordinatorID;
     private final Set<Integer> startedElectionCoordinators;
@@ -46,7 +55,7 @@ public class Replica extends AbstractReplica implements DistributedActor {
     private CrashStatus replicaStatus;
     private int crashCount;
     private AbstractReplica.Crash pendingCrash;
-    ////////////////////////////////////////////
+    ///////////////////////////////////////
 
     // Manages heartbeat sending or coordinator monitoring for this Replica
     private HeartbeatTransaction heartbeatTransaction;
@@ -68,6 +77,10 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.crashCount = 0;
         this.activeTransactions = new LinkedList<>();
         this.transactionCounter = 0;
+        this.updateHistory = new HashMap<>();
+        this.epochPair = new EpochPair(0, 0);
+        this.updateSequenceEpoch = this.epochPair.getEpoch();
+        this.nextUpdateSequence = this.epochPair.getSequence() + 1;
         // Negative sequence numbers are reserved for election transactions.
         // Heartbeat transactions use sequence 0, while ordinary transaction IDs
         // obtained through getNextTransactionId() remain non-negative.
@@ -106,6 +119,10 @@ public class Replica extends AbstractReplica implements DistributedActor {
                     "Index must be between 0 and " + (AbstractReplica.POSITIONS_LIST_LENGTH - 1));
         }
         positions[index] = value;
+    }
+
+    public ActorRef getCoordinator() {
+        return groupOfReplicas.get(coordinatorID);
     }
 
     ///////////// Sending helpers ////////////
@@ -160,6 +177,22 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.tell(msg, target);
         updateCrashStatusCallback(msg);
     }
+
+    /**
+     * This method returns true if the replica is currently the coordinator.
+     */
+    public boolean isCoordinator() {
+        return this.id == this.coordinatorID;
+    }
+
+    /**
+     * Returns the upper bound used while waiting for the next update phase.
+     *
+     * @return update phase timeout in milliseconds
+     */
+    long getUpdatePhaseTimeoutDelay() {
+        return 4L * getMaxLatencyPlusTolerance();
+    }
     ////////////////////////////////////////////
 
     @Override
@@ -175,7 +208,13 @@ public class Replica extends AbstractReplica implements DistributedActor {
             throw new IllegalStateException("Cannot initialize heartbeat: coordinator is not in the replica group.");
         }
 
-        TransactionId heartbeatTransactionId = new TransactionId(coordinator, INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE);
+        TransactionId heartbeatTransactionId;
+
+        if (this.isCoordinator()) {
+            heartbeatTransactionId = this.getNextTransactionId();
+        } else {
+            heartbeatTransactionId = new TransactionId(coordinator, INITIAL_HEARTBEAT_TRANSACTION_SEQUENCE);
+        }
 
         this.heartbeatTransaction = new HeartbeatTransaction(heartbeatTransactionId, this, getEpochPair());
 
@@ -249,10 +288,19 @@ public class Replica extends AbstractReplica implements DistributedActor {
         this.coordinatorID = coordinatorID;
     }
 
+    /**
+     * Returns the current epoch pair of the replica.
+     * @return The current epoch pair of the replica.
+     */
     public EpochPair getEpochPair() {
         return this.epochPair;
     }
 
+    /**
+     * Sets the current epoch pair of the replica.
+     * @param epochPair The new epoch pair to be set.
+     * @throws IllegalArgumentException if the provided epochPair is null or if it is less than the current epochPair.
+     */
     public void setEpochPair(EpochPair epochPair) throws IllegalArgumentException {
         if (epochPair == null) {
             throw new IllegalArgumentException("EpochPair cannot be null");
@@ -265,11 +313,63 @@ public class Replica extends AbstractReplica implements DistributedActor {
             throw new IllegalArgumentException("New epochPair must be greater than or equal to the current epochPair");
         }
         this.epochPair = epochPair;
+
+        if (this.updateSequenceEpoch != epochPair.getEpoch()) {
+            this.updateSequenceEpoch = epochPair.getEpoch();
+            this.nextUpdateSequence = epochPair.getSequence() + 1;
+        } else {
+            this.nextUpdateSequence = Math.max(this.nextUpdateSequence, epochPair.getSequence() + 1);
+        }
+    }
+
+    /**
+     * Reserves the next total-order identity for an update started by this
+     * coordinator. Reservation is separate from {@link #epochPair}: an update
+     * may be in flight before it is committed locally.
+     *
+     * @return a unique pair for the current coordinator epoch
+     * @throws IllegalStateException if this replica is not the coordinator
+     */
+    EpochPair reserveNextUpdateEpochPair() {
+        if (!isCoordinator()) {
+            throw new IllegalStateException("Only the coordinator can order updates");
+        }
+
+        int currentEpoch = this.epochPair.getEpoch();
+        if (this.updateSequenceEpoch != currentEpoch) {
+            this.updateSequenceEpoch = currentEpoch;
+            this.nextUpdateSequence = this.epochPair.getSequence() + 1;
+        }
+
+        EpochPair reserved = new EpochPair(this.updateSequenceEpoch, this.nextUpdateSequence);
+        this.nextUpdateSequence++;
+        return reserved;
+    }
+
+    /**
+     * Returns the update history of the replica, which is a map of epoch pairs to their corresponding UpdateTransaction.
+     * @return A map containing the update history of the replica.
+     */
+    public Map<EpochPair, UpdateTransaction> getUpdateHistory() {
+        return new HashMap<>(this.updateHistory);
+    }
+
+    /**
+     * Adds an UpdateTransaction to the update history of the replica.
+     * @param updateTransaction The UpdateTransaction to be added to the history.
+     */
+    public void addUpdateToHistory(EpochPair updateId, UpdateTransaction updateTransaction) {
+        if (updateId == null) {
+            throw new IllegalArgumentException("Committed updates must have an EpochPair");
+        }
+        this.updateHistory.put(updateId, updateTransaction);
     }
 
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
+                .match(ReadMsg.class, this::onReadMsg)
+                .match(UpdateMsg.class, this::onUpdateMsg)
                 .match(WriteMsg.class, this::onWriteMsg)
                 .match(ElectionMsg.class, this::onElectionMsg)
                 .match(ElectionStartMsg.class, this::onElectionStartMsg)
@@ -305,6 +405,24 @@ public class Replica extends AbstractReplica implements DistributedActor {
         WriteTransaction transaction =
                 new WriteTransaction(msg.transactionId, this, getEpochPair(), msg.index, msg.value, msg.sender);
         scheduleTransaction(transaction);
+    }
+
+    void onUpdateMsg(UpdateMsg msg) {
+        // debug("Received UpdateMsg for transaction: " + msg.transactionId);
+        // debug("Received UpdateMsg [index: " + msg.index + ", value: " + msg.value + "]");
+        if (!msg.transactionId.initiator.equals(this.getSelf())) {
+            UpdateTransaction transaction =
+                    new UpdateTransaction(msg.transactionId, this, msg.epochPair, msg.index, msg.value, msg.sender);
+            this.scheduleTransaction(transaction);
+        } else {
+            onMessage(msg);
+        }
+    }
+
+    public void onReadMsg(ReadMsg msg) {
+        unicast(
+                new ReadResultMsg(msg.transactionId, msg.epochPair, getSelf(), getPosition(msg.index), this.id),
+                msg.sender);
     }
 
     void startElection(int failedCoordinatorId) {
@@ -705,11 +823,9 @@ public class Replica extends AbstractReplica implements DistributedActor {
     }
 
     /**
-     * This callback method is invoked whenever a message is received by the replica and the parameter allows to differentiate the type of message.
-     * The callback then checks if the replica is in a pending crash state and if the type of message matches the pending crash type.
-     * If so, it increments the crash count and checks if it has reached the threshold for crashing.
-     * If the threshold is met, the replica's status is updated to CRASHED.
-     * @param crashType Enum representing the type of message received, used to determine if the replica should crash and if to increment the crash count.
+     * This callback handles the counting of messages received by the replica when a pending crash is set.
+     * Call this method passing the handled message to update accordingly to its type and the pending crash type.
+     * @param msg The message handled by the replica.
      */
     void updateCrashStatusCallback(Msg msg) {
         if (this.replicaStatus == CrashStatus.PENDING) {
@@ -717,6 +833,9 @@ public class Replica extends AbstractReplica implements DistributedActor {
                     switch (msg) {
                         case HeartbeatMsg _, WatchdogExpiredMsg _ -> this.pendingCrash.type == Crash.Type.Heartbeat;
                         case WriteFinishMsg _ -> this.pendingCrash.type == Crash.Type.WriteOK;
+                        case UpdateMsg _, UpdateTimeoutMsg _, UpdateAckMsg _, WriteOkMsg _, WriteOkTimeoutMsg _ -> {
+                            yield this.pendingCrash.type == Crash.Type.Update;
+                        }
                         case ElectionMsg _, ElectionTransaction.ElectionAckMsg _,
                                 ElectionTransaction.ElectionAckTimeoutMsg _,
                                 ElectionTransaction.ElectionRejectMsg _, SynchronizationMsg _ ->

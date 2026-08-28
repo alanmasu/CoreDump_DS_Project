@@ -8,14 +8,23 @@ import akka.testkit.javadsl.TestKit;
 import it.unitn.ds.AbstractReplica.InitSystem;
 import it.unitn.ds.HeartbeatTransaction.HeartbeatMsg;
 import it.unitn.ds.HeartbeatTransaction.HeartbeatTickMsg;
+import it.unitn.ds.Logger;
 import it.unitn.ds.Replica;
 import it.unitn.ds.Transaction.TransactionId;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 class TestHeartbeatTransaction {
+
+    @BeforeAll
+    static void setUp() {
+        Logger.setDestinationStdout();
+        Logger.setDebugEnabled(true);
+        Logger.setLoggingEnabled(true);
+    }
 
     @Test
     void coordinatorBroadcastsHeartbeatsPeriodically() {

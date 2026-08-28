@@ -52,7 +52,9 @@ public class Client extends AbstractClient implements DistributedActor {
 
     @Override
     public void sendRead(ActorRef replica, int index) {
-        // TODO: implement
+        // TODO: Add the correct startEpochPair to the ReadTransaction constructor
+        ReadTransaction transaction = new ReadTransaction(getNextTransactionId(), this, null, index, replica);
+        scheduleTransaction(transaction);
     }
 
     @Override
@@ -72,9 +74,6 @@ public class Client extends AbstractClient implements DistributedActor {
     @Override
     public final Receive createReceive() {
         return createBaseReceiveBuilder()
-                .match(WriteTransaction.WriteTimeoutMsg.class, this::onMessage)
-                .match(WriteTransaction.WriteResultMsg.class, this::onMessage)
-                // Handle TestMsg messages, leave it as last
                 .match(ProbeMsg.class, this::onProbeMsg)
                 .matchAny(msg -> defaultDispatcher(msg))
                 .build();
